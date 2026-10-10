@@ -1230,12 +1230,16 @@ impl Session for LinkSession {
                     vec![menu_header(tx, 0, u32::from(self.device))]
                 }
             }
-            // Neither request expects a reply. In particular, RX3's
-            // `dbcl_SetOnAir` must not replace an unrelated pending menu with
-            // a spurious generic `0x4000` response.
-            kind::TEARDOWN | kind::SET_ON_AIR | 0x3203 | 0x3503 => Vec::new(),
             kind::SAVE_EXTENDED_CUE => self.save_extended_cue(message),
             kind::SAVE_CUE => self.save_cue(message),
+            // These notices expect no reply. RX3's `dbcl_SetOnAir` must not
+            // receive a spurious generic `0x4000` response either.
+            // [OBS, static] rekordbox's SavVbrInf accepts 0x2205 without
+            // a reply or a storage call. [OBS, #43 capture, RBX 1.5.0]
+            // XDJ-700 1.15 uploads 1604 bytes this way; our generic ERROR
+            // response immediately precedes its E-8306/empty-browser failure.
+            // An unsolicited response can be consumed by the next request.
+            kind::TEARDOWN | kind::SET_ON_AIR | 0x3203 | 0x3503 | kind::SAVE_VBR => Vec::new(),
             0x2805 | 0x2905 => Self::analysis_write_refusal(message)
                 .unwrap_or_else(|| self.handle_menu(message)),
             // V4 OnPrepareCmd / OnOtherCmd: scalar responses, no menu/cache

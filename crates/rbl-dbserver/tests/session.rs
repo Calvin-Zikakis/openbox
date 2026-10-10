@@ -328,6 +328,25 @@ fn args(item: &Message) -> String {
 }
 
 #[test]
+fn xdj700_vbr_upload_is_silent_and_preserves_the_browse_menu() {
+    // [OBS] #43, XDJ-700 1.15 against RBX 1.5.0, TCP payloads in
+    // frames 3896-3897. The old generic ERROR immediately precedes E-8306.
+    let bytes = include_bytes!("corpus/xdj700-save-vbr.bin");
+    let (upload, consumed) = Message::decode(bytes).unwrap();
+    assert_eq!(consumed, bytes.len());
+    assert_eq!(upload.kind, kind::SAVE_VBR);
+    assert_eq!(upload.arguments[2], Argument::Number(1604));
+    let mut s = session();
+    let context = 0x0203_0401;
+    let render = numbers(kind::RENDER, upload.transaction + 1, &[context, 0, 1, 0, 1, 0]);
+    s.handle(&numbers(kind::TRACK_MENU, upload.transaction - 1, &[context, 0]));
+    let expected = s.handle(&render);
+    assert!(expected.iter().any(|message| message.kind == kind::MENU_ITEM));
+    assert!(s.handle(&upload).is_empty());
+    assert_eq!(s.handle(&render), expected);
+}
+
+#[test]
 fn the_root_menu_matches_the_captured_cdj_3000_rekordbox_response() {
     let mut s = session();
     let (count, items) = browse(&mut s, kind::ROOT_MENU, &[CTX, 0, 0x5cf_ffff]);

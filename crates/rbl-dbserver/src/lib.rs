@@ -476,6 +476,9 @@ pub mod kind {
     /// milliseconds]`, op 1 to save and 0 to delete. Answered with the
     /// track's legacy cue list in [`HOT_CUE_BANK_REPLY`].
     pub const SAVE_CUE: u16 = 0x2105;
+    /// A player's VBR information upload. Rekordbox accepts this without
+    /// storing it or replying (`PSvDBMain::SavVbrInf`).
+    pub const SAVE_VBR: u16 = 0x2205;
     /// A player saving or deleting one cue in the extended record
     /// (`CMD_SAV_USB_CUE2`): `[r:m:s:t, track, op, length, record]`, op 1 to
     /// save and 0 to delete. Answered with the track's extended cue list in
@@ -640,6 +643,7 @@ pub mod kind {
             BEAT_GRID => "beat grid".to_owned(),
             SAVE_GRID_OFFSET => "save grid offset".to_owned(),
             SAVE_CUE => "save cue".to_owned(),
+            SAVE_VBR => "save VBR".to_owned(),
             SAVE_EXTENDED_CUE => "save extended cue".to_owned(),
             GRID_OFFSET => "grid offset".to_owned(),
             VBR => "VBR".to_owned(),
