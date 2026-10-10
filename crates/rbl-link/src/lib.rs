@@ -40,6 +40,10 @@ pub use rbl_dbserver::catalog::{ArtistRole, Edit, HotCueColour, PlayerCue, RootC
 pub use rbl_prolink::DeviceType;
 pub use watch::Watcher;
 
+/// Reports a generic unsupported database request from a player. Arguments are
+/// transaction ID, request kind, and player number.
+pub type UnsupportedCommandReporter = Arc<dyn Fn(u32, u16, u8) + Send + Sync>;
+
 /// The ports rekordbox uses, which a player expects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ports {
@@ -203,6 +207,17 @@ impl LinkExport {
         interface: Interface,
         ports: Ports,
     ) -> Result<Self, LinkError> {
+        Self::start_with_unsupported_command_reporter(source, interface, ports, None)
+    }
+
+    /// Starts Link Export and optionally observes generic unsupported database
+    /// requests without making the protocol layer depend on telemetry.
+    pub fn start_with_unsupported_command_reporter(
+        source: Arc<dyn Source>,
+        interface: Interface,
+        ports: Ports,
+        unsupported_command_reporter: Option<UnsupportedCommandReporter>,
+    ) -> Result<Self, LinkError> {
         let library = source.library().ok_or(LinkError::NoLibrary)?;
         let played = Played::default();
         let catalog = Arc::new(IndexCatalog::new(Arc::clone(&source), played.clone()));
@@ -231,8 +246,11 @@ impl LinkExport {
         .map_err(|e| LinkError::Bind(explain(&e, "UDP", ports.announce)))?;
         let number = beacon.number_cell();
 
-        let handler: Arc<dyn rbl_dbserver::net::Handler> =
-            Arc::new(CatalogHandler::new(catalog.clone()).with_device(Arc::clone(&number)));
+        let mut handler = CatalogHandler::new(catalog.clone()).with_device(Arc::clone(&number));
+        if let Some(reporter) = unsupported_command_reporter {
+            handler = handler.with_unsupported_command_reporter(reporter);
+        }
+        let handler: Arc<dyn rbl_dbserver::net::Handler> = Arc::new(handler);
         let listen_on = service_bind_address(&interface);
         let database =
             rbl_dbserver::net::Bound::start(handler, listen_on, ports.query, ports.database)

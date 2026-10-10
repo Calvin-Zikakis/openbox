@@ -48,3 +48,23 @@ pub fn install() -> sentry::ClientInitGuard {
 pub fn capture_internal_error() {
     sentry::capture_message("internal backend error", sentry::Level::Error);
 }
+
+/// Records a player request that RBXport answered with generic `0x4003`.
+///
+/// The fields identify the protocol mismatch without exporting player names,
+/// addresses, library paths, or request contents.
+pub fn capture_unsupported_link_database_command(transaction: u32, command: u16, player: u8) {
+    sentry::with_scope(
+        |scope| {
+            scope.set_tag("component", "link_database");
+            scope.set_tag("command", format!("0x{command:04x}"));
+            scope.set_tag("transaction", format!("0x{transaction:08x}"));
+            scope.set_tag("player", player.to_string());
+            scope.set_fingerprint(Some(&[
+                "unsupported-link-database-command",
+                &format!("{command:04x}"),
+            ]));
+        },
+        || sentry::capture_message("unsupported Link database command", sentry::Level::Warning),
+    );
+}

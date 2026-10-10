@@ -21,6 +21,12 @@ use crate::{keys, kind, menu_footer, menu_header, setup_reply, Argument, Message
 /// negotiated number and refuses network sessions while that number is zero.
 pub const DEVICE: u8 = 0x11;
 
+/// Receives each generic unsupported-command reply emitted by a Link session.
+///
+/// The protocol crate does not depend on any telemetry provider. Applications
+/// may install this callback to observe unsupported player requests.
+pub type UnsupportedCommandReporter = Arc<dyn Fn(u32, u16, u8) + Send + Sync>;
+
 /// Serves a catalog to every player that connects.
 pub struct CatalogHandler {
     catalog: Arc<dyn Catalog>,
@@ -28,6 +34,7 @@ pub struct CatalogHandler {
     /// another rekordbox holds 17 — and `0` while there is none, which is
     /// also what keeps the port query unanswered until the link is up.
     device: Arc<AtomicU8>,
+    unsupported_command_reporter: Option<UnsupportedCommandReporter>,
 }
 
 impl CatalogHandler {
@@ -35,6 +42,7 @@ impl CatalogHandler {
         Self {
             catalog,
             device: Arc::new(AtomicU8::new(DEVICE)),
+            unsupported_command_reporter: None,
         }
     }
 
@@ -44,18 +52,34 @@ impl CatalogHandler {
         self.device = device;
         self
     }
+
+    /// Reports generic `0x4003` responses without coupling protocol handling
+    /// to an application's telemetry implementation.
+    #[must_use]
+    pub fn with_unsupported_command_reporter(mut self, reporter: UnsupportedCommandReporter) -> Self {
+        self.unsupported_command_reporter = Some(reporter);
+        self
+    }
 }
 
 impl Handler for CatalogHandler {
     fn open(&self) -> Box<dyn Session> {
         let device = self.device.load(Ordering::Relaxed);
-        Box::new(LinkSession::new(Arc::clone(&self.catalog)).as_device(device))
+        Box::new(
+            LinkSession::new(Arc::clone(&self.catalog))
+                .as_device(device)
+                .with_unsupported_command_reporter(self.unsupported_command_reporter.clone()),
+        )
     }
 
     fn open_ready(&self) -> Option<Box<dyn Session>> {
         let device = self.device.load(Ordering::Relaxed);
         if device == 0 { return None; }
-        Some(Box::new(LinkSession::new(Arc::clone(&self.catalog)).as_device(device)))
+        Some(Box::new(
+            LinkSession::new(Arc::clone(&self.catalog))
+                .as_device(device)
+                .with_unsupported_command_reporter(self.unsupported_command_reporter.clone()),
+        ))
     }
 
     fn serving(&self) -> bool {
@@ -112,6 +136,7 @@ pub struct LinkSession {
     filter: crate::filter::TrackFilter,
     /// Our own, in the setup reply.
     device: u8,
+    unsupported_command_reporter: Option<UnsupportedCommandReporter>,
 }
 
 impl LinkSession {
@@ -123,6 +148,7 @@ impl LinkSession {
             extended: true,
             filter: crate::filter::TrackFilter::default(),
             device: DEVICE,
+            unsupported_command_reporter: None,
         }
     }
 
@@ -131,6 +157,22 @@ impl LinkSession {
     pub fn as_device(mut self, device: u8) -> Self {
         self.device = device;
         self
+    }
+
+    fn with_unsupported_command_reporter(mut self, reporter: Option<UnsupportedCommandReporter>) -> Self {
+        self.unsupported_command_reporter = reporter;
+        self
+    }
+
+    fn unsupported_command(&self, message: &Message) -> Vec<Message> {
+        if let Some(reporter) = &self.unsupported_command_reporter {
+            reporter(message.transaction, message.kind, self.player);
+        }
+        vec![Message::new(
+            message.transaction,
+            kind::ERROR,
+            vec![Argument::Number(u32::from(message.kind))],
+        )]
     }
 
     fn number(message: &Message, index: usize) -> u32 {
@@ -1093,11 +1135,7 @@ impl LinkSession {
             kind::DELIVERY_INFO => self.track_menu(message, Menu::DeliveryInfo),
             // Unknown commands are not menus: rekordbox returns 4003 and
             // leaves the currently rendered menu at this location intact.
-            _ => vec![Message::new(
-                message.transaction,
-                kind::ERROR,
-                vec![Argument::Number(u32::from(message.kind))],
-            )],
+            _ => self.unsupported_command(message),
         }
     }
 
@@ -1254,7 +1292,7 @@ impl Session for LinkSession {
                     }
                     // Malformed decoded shapes are deliberately refused; the
                     // vendor malformed-request policy is not established.
-                    _ => vec![Message::new(tx, kind::ERROR, vec![Argument::Number(u32::from(message.kind))])],
+                    _ => self.unsupported_command(message),
                 }
             }
             // RX3 `dbcl_GetBrowseType` falls back to this request when the

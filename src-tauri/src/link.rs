@@ -488,7 +488,16 @@ impl Session {
             device_settings,
             key_order,
         ));
-        let export = LinkExport::start(source, chosen, Ports::REKORDBOX).map_err(|e| e.to_string())?;
+        let unsupported_command_reporter = Arc::new(|transaction, command, player| {
+            crate::sentry::capture_unsupported_link_database_command(transaction, command, player);
+        });
+        let export = LinkExport::start_with_unsupported_command_reporter(
+            source,
+            chosen,
+            Ports::REKORDBOX,
+            Some(unsupported_command_reporter),
+        )
+        .map_err(|e| e.to_string())?;
         let rx3_activation = match rx3 {
             Some(rx3) => match rx3.activate() {
                 Ok(activation) => Some(activation),

@@ -9,7 +9,7 @@
     clippy::panic
 )]
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rbl_dbserver::catalog::{
     Analysis, Catalog, Edit, HotCueBank, HotCueBankCue, Query, RootCategory, Row, Sort,
@@ -1758,6 +1758,24 @@ fn unsupported_command_keeps_the_active_menu_and_echoes_its_kind_in_4003() {
         rendered.last().map(|message| message.kind),
         Some(kind::MENU_FOOTER)
     );
+}
+
+#[test]
+fn unsupported_command_reports_the_request_that_received_4003() {
+    let reports = Arc::new(Mutex::new(Vec::new()));
+    let reporter = Arc::clone(&reports);
+    let handler = CatalogHandler::new(Arc::new(Small(false))).with_unsupported_command_reporter(Arc::new(
+        move |transaction, command, player| {
+            reporter.lock().unwrap().push((transaction, command, player));
+        },
+    ));
+    let mut session = handler.open();
+    session.handle(&setup_request(3));
+
+    let reply = session.handle(&numbers(0x2fff, 0x8123, &[CTX, 0]));
+
+    assert_eq!(reply[0].kind, kind::ERROR);
+    assert_eq!(*reports.lock().unwrap(), vec![(0x8123, 0x2fff, 3)]);
 }
 
 /// Pass complete wire requests through the codec before the session dispatcher.
