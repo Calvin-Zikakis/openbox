@@ -15,39 +15,24 @@ export type AnalysisChoice = AnalysisSettings & { mode: AnalysisMode };
  * with Auto Analysis on it says "Auto Analysis is starting." instead, with
  * BPM / Grid ticked and greyed, since every track it covers has never been
  * analysed [OBS: rekordbox 7.2.14, chris-win11].
- *
- * Loading a never-analysed track onto a deck opens it a third way
- * (`load`): the same greyed BPM / Grid, then "Note: You can change this
- * setting in [Preferences] > [Analysis]." and a "Don't ask me again" box,
- * with OK and no Cancel button [OBS static, rekordbox 7.2.19 macOS arm64:
- * `AnalysisSettingWindow::AnalysisSettingWindow(bool, bool)` @0x100920cfc,
- * first flag set and second clear @0x100921bc8 builds `lblMessage1` and the
- * toggle, and no Cancel]. Escape still closes it, analysing nothing.
  */
-export function AnalysisDialog({ count, auto = false, load = false, initialMode, initialFirstBeatCue, onConfirm, onCancel }: {
+export function AnalysisDialog({ count, auto = false, initialMode, initialFirstBeatCue, onConfirm, onCancel }: {
   count: number;
   /** The launch prompt for never-analysed Collection tracks. */
   auto?: boolean;
-  /** The prompt for a never-analysed track loaded onto a deck. */
-  load?: boolean;
   initialMode: AnalysisMode;
   /** The Preferences default; changing the box here applies to this batch only. */
   initialFirstBeatCue: boolean;
-  /** `dontAsk`: the load prompt's "Don't ask me again", ticked. */
-  onConfirm: (settings: AnalysisChoice, dontAsk: boolean) => void;
+  onConfirm: (settings: AnalysisChoice) => void;
   onCancel: () => void;
 }) {
-  // Both rekordbox prompts that analyse tracks it never analysed tick BPM /
-  // Grid and grey it out.
-  const prompt = auto || load;
   // The launch prompt always starts from its defaults; Analyze Track starts
   // from what it was last confirmed with.
   const [settings, setSettings] = useState<AnalysisChoice>(() => ({
     mode: initialMode, bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180,
     firstBeatCue: initialFirstBeatCue,
-    ...(prompt ? {} : lastAnalysisChoice()),
+    ...(auto ? {} : lastAnalysisChoice()),
   }));
-  const [dontAsk, setDontAsk] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
@@ -66,14 +51,14 @@ export function AnalysisDialog({ count, auto = false, load = false, initialMode,
     <dialog ref={dialog} className={styles.dialog} aria-labelledby="analysis-title"
       onCancel={event => { event.preventDefault(); onCancel(); }}
       onKeyDown={event => event.stopPropagation()}>
-      <form onSubmit={event => { event.preventDefault(); if (!canAnalyse) return; if (!prompt) rememberAnalysisChoice(settings); onConfirm(settings, load && dontAsk); }}>
+      <form onSubmit={event => { event.preventDefault(); if (!canAnalyse) return; if (!auto) rememberAnalysisChoice(settings); onConfirm(settings); }}>
         <h2 id="analysis-title" className={styles.title}>{t("Analysis Setting")}</h2>
-        {prompt ? null : (
+        {auto ? null : (
           <p className={styles.selection}>{count} {count === 1 ? t("track selected") : t("tracks selected")}</p>
         )}
         <div className={styles.options}>
           <label className={styles.check}>
-            <input type="checkbox" checked={settings.bpmGrid} disabled={prompt}
+            <input type="checkbox" checked={settings.bpmGrid} disabled={auto}
               onChange={event => update({ bpmGrid: event.target.checked })} />
             {t("BPM / Grid")}
           </label>
@@ -106,15 +91,7 @@ export function AnalysisDialog({ count, auto = false, load = false, initialMode,
             {t("KEY")}
           </label>
         </div>
-        {load ? (
-          <>
-            <p className={styles.note}>{t("Note: You can change this setting in [Preferences] > [Analysis].")}</p>
-            <label className={styles.check}>
-              <input type="checkbox" checked={dontAsk} onChange={event => setDontAsk(event.target.checked)} />
-              {t("Don't ask me again")}
-            </label>
-          </>
-        ) : auto ? (
+        {auto ? (
           <p className={styles.note}>{t("Auto Analysis is starting.")}</p>
         ) : (
           <p className={styles.note}>
@@ -123,7 +100,7 @@ export function AnalysisDialog({ count, auto = false, load = false, initialMode,
         )}
         <div className={styles.buttons}>
           <button type="submit" disabled={!canAnalyse}>{t("OK")}</button>
-          {load ? null : <button type="button" onClick={onCancel}>{t("Cancel")}</button>}
+          <button type="button" onClick={onCancel}>{t("Cancel")}</button>
         </div>
       </form>
     </dialog>
