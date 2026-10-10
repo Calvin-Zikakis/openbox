@@ -78,3 +78,7 @@ jobs:
             echo "::error::rbxport did not create a Linux window"
             exit 1
           ' _ target/debug/rbxport "$log"
+
+      - name: Clean the runner
+        if: always()
+        uses: ./.github/actions/clean-runner

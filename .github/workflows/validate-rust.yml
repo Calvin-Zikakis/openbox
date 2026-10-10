@@ -103,6 +103,10 @@ jobs:
           printf 'Testing affected Rust packages: %s\n' "${packages[*]}"
           cargo test "${args[@]}"
 
+      - name: Clean the runner
+        if: always()
+        uses: ./.github/actions/clean-runner
+
   msrv:
     name: Rust MSRV check
     needs: rust
@@ -141,3 +145,7 @@ jobs:
 
       - name: Check the declared MSRV
         run: cargo +1.89.0 check --workspace --all-targets
+
+      - name: Clean the runner
+        if: always()
+        uses: ./.github/actions/clean-runner
