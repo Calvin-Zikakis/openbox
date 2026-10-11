@@ -466,6 +466,9 @@ pub mod kind {
     pub const CONTENT_ARTWORK: u16 = 0x2103;
     /// The small waveform preview.
     pub const WAVEFORM_PREVIEW: u16 = 0x2004;
+    /// A player's waveform-analysis upload. Rekordbox stores the waveform
+    /// data when its guards permit, but sends no wire reply.
+    pub const SAVE_WAVEFORM: u16 = 0x2005;
     /// Track information: the path and the copyright text (7 rows).
     pub const TRACK_INFO: u16 = 0x2102;
     /// The beat grid.

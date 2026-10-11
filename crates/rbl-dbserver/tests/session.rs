@@ -347,6 +347,32 @@ fn xdj700_vbr_upload_is_silent_and_preserves_the_browse_menu() {
 }
 
 #[test]
+fn waveform_upload_is_silent_and_preserves_the_browse_menu() {
+    // [OBS, static] rekordbox 7.2.11's OnWriteCmd recognizes 0x2005 and
+    // performs no wire reply after its waveform-storage path.
+    let mut s = session();
+    let context = 0x0203_0401;
+    let upload = Message::new(
+        0x5800_002f,
+        kind::SAVE_WAVEFORM,
+        vec![
+            Argument::Number(context),
+            Argument::Number(0),
+            Argument::Number(TRACK),
+            Argument::Number(0),
+            Argument::Number(900),
+            Argument::Blob(vec![0; 900]),
+        ],
+    );
+    let render = numbers(kind::RENDER, upload.transaction + 1, &[context, 0, 1, 0, 1, 0]);
+    s.handle(&numbers(kind::TRACK_MENU, upload.transaction - 1, &[context, 0]));
+    let expected = s.handle(&render);
+    assert!(expected.iter().any(|message| message.kind == kind::MENU_ITEM));
+    assert!(s.handle(&upload).is_empty());
+    assert_eq!(s.handle(&render), expected);
+}
+
+#[test]
 fn the_root_menu_matches_the_captured_cdj_3000_rekordbox_response() {
     let mut s = session();
     let (count, items) = browse(&mut s, kind::ROOT_MENU, &[CTX, 0, 0x5cf_ffff]);
