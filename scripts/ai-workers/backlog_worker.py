@@ -4,11 +4,12 @@
 Run with no arguments for the menu. `--run` skips the menu and runs the
 12-hour scheduler in the foreground (for launchd, ssh, or a spare terminal).
 
-The scheduler checks the tmux session every 12 hours (CHECK_INTERVAL seconds):
+The scheduler checks the tmux session every 12 hours (RBX_CHECK_INTERVAL seconds):
   - goal finished (achieved / could not be achieved / cleared) or claude gone:
     kill the session and start a fresh one
   - goal still running: wait another interval
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,8 +23,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-SESSION = os.environ.get("SESSION", "rbx backlog worker")
-CHECK_INTERVAL = int(os.environ.get("CHECK_INTERVAL", 12 * 3600))
+SESSION = os.environ.get("RBX_SESSION", "rbx backlog worker")
+CHECK_INTERVAL = int(os.environ.get("RBX_CHECK_INTERVAL", 12 * 3600))
 REPO_DIR = Path(__file__).resolve().parents[2]
 GOAL = (
     "/goal Continuously run the take-tickets skill. If it stalls, restart it on "
@@ -52,8 +53,16 @@ def has_session() -> bool:
 
 def start_session() -> None:
     log(f'starting tmux session "{SESSION}"')
-    tmux("new-session", "-d", "-s", SESSION, "-c", str(REPO_DIR),
-         f"cy {shlex.quote(GOAL)}", check=True)
+    tmux(
+        "new-session",
+        "-d",
+        "-s",
+        SESSION,
+        "-c",
+        str(REPO_DIR),
+        f"cy {shlex.quote(GOAL)}",
+        check=True,
+    )
 
 
 def kill_session() -> None:
@@ -163,7 +172,10 @@ def menu() -> None:
     actions = {
         "1": ("Start worker", do_start),
         "2": ("Attach to session (read-write)", attach),
-        "3": ("Attach read-only (watch live, can't type)", lambda: attach(read_only=True)),
+        "3": (
+            "Attach read-only (watch live, can't type)",
+            lambda: attach(read_only=True),
+        ),
         "4": ("Peek at recent output", peek),
         "5": ("Restart worker now", do_restart),
         "6": ("Stop worker", do_stop),
@@ -192,8 +204,11 @@ def menu() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--run", action="store_true",
-                        help="run the 12-hour scheduler in the foreground, no menu")
+    parser.add_argument(
+        "--run",
+        action="store_true",
+        help="run the 12-hour scheduler in the foreground, no menu",
+    )
     args = parser.parse_args()
     for tool in ("tmux", "cy"):
         if shutil.which(tool) is None:
