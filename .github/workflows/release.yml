@@ -63,6 +63,20 @@ jobs:
             echo "::error::dev changed before this release started; its newer push owns the release."
             exit 1
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$skip_version_bump" != true ]; then
+            current="$(node -p 'require("./package.json").version')"
+            if ! git rev-parse -q --verify "refs/tags/v$current^{commit}" >/dev/null; then
+              # An earlier run recorded this version but never tagged it.
+              cut="$(git log -1 --format=%H --fixed-strings --grep="chore(release): cut $current" HEAD)"
+              if [ -z "$cut" ]; then
+                echo "::error::v$current is untagged and no release commit records it."
+                exit 1
+              fi
+              git revert --no-edit "$cut"
+            fi
+          fi
           if [ "$skip_version_bump" = true ]; then
             version="$(node -p 'require("./package.json").version')"
           else
@@ -79,6 +93,26 @@ jobs:
           elif git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
             echo "::error::v$version already exists; tags are immutable."
             exit 1
+          else
+            # Record the version on dev now, so validation covers the exact
+            # commit that gets tagged and later merges to dev cannot strand it.
+            previous="v$(node -p 'require("./package.json").version')"
+            node scripts/sync-version.mjs --version "$version"
+            # npm run deploy attaches the curated notes to the source commit as a
+            # git note (a dispatch input would be dropped while main lacks it).
+            # Without one, notes are derived from the commits.
+            if git fetch origin "+refs/notes/release-notes:refs/notes/release-notes" 2>/dev/null \
+              && RELEASE_NOTES_JSON="$(git notes --ref release-notes show "$source" 2>/dev/null)"; then
+              export RELEASE_NOTES_JSON
+            fi
+            VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$source" \
+              node scripts/generate-release-notes.mjs
+            node scripts/release-preflight.mjs --version "$version" --expect-untagged
+            git add Cargo.toml Cargo.lock package.json src-tauri/tauri.conf.json release-notes.json
+            git commit -m "chore(release): cut $version" \
+              -m "Record the version and generated release notes for validation."
+            git push origin HEAD:dev
+            source="$(git rev-parse HEAD)"
           fi
           {
             echo "release=true"
@@ -145,43 +179,23 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
+          # The release commit was pushed to dev before validation; dev may have
+          # moved on since, which is fine as long as it still contains it.
           git fetch origin dev --tags
           test "$SOURCE_REF" = "$(git rev-parse HEAD)"
-          test "$SOURCE_REF" = "$(git rev-parse origin/dev)"
+          git merge-base --is-ancestor "$SOURCE_REF" origin/dev
           if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "::error::$RELEASE_TAG already exists; tags are immutable."
             exit 1
           fi
           version="${RELEASE_TAG#v}"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Releases must use stable semantic versions; got $version."
-            exit 1
-          fi
-          current="$(node -p 'require("./package.json").version')"
-          previous="v$current"
-          git rev-parse --verify "refs/tags/$previous^{commit}"
-          git merge-base --is-ancestor "$previous" "$SOURCE_REF"
-          node scripts/sync-version.mjs --version "$version"
-          # npm run deploy attaches the curated notes to the source commit as a
-          # git note (a dispatch input would be dropped while main lacks it).
-          # Without one, notes are derived from the commits.
-          if git fetch origin "+refs/notes/release-notes:refs/notes/release-notes" 2>/dev/null \
-            && RELEASE_NOTES_JSON="$(git notes --ref release-notes show "$SOURCE_REF" 2>/dev/null)"; then
-            export RELEASE_NOTES_JSON
-          fi
-          VERSION="$version" PREVIOUS="$previous" SOURCE_REF="$SOURCE_REF" \
-            node scripts/generate-release-notes.mjs
           node scripts/release-preflight.mjs --version "$version" --expect-untagged
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock package.json src-tauri/tauri.conf.json release-notes.json
-          git commit -m "chore(release): cut $version" \
-            -m "Record the version and generated release notes after validation passed."
-          final="$(git rev-parse HEAD)"
-          git tag -a "$RELEASE_TAG" -m "rbxport $version" "$final"
-          git push --atomic origin HEAD:dev "$RELEASE_TAG"
+          git tag -a "$RELEASE_TAG" -m "rbxport $version" "$SOURCE_REF"
+          git push origin "$RELEASE_TAG"
           {
-            echo "source_ref=$final"
+            echo "source_ref=$SOURCE_REF"
             echo "release_tag=$RELEASE_TAG"
           } >> "$GITHUB_OUTPUT"
 
@@ -212,7 +226,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin dev main
-          test "$SOURCE_REF" = "$(git rev-parse origin/dev)"
+          git merge-base --is-ancestor "$SOURCE_REF" origin/dev
           git merge-base --is-ancestor origin/main "$SOURCE_REF"
           git switch main
           git merge --ff-only "$SOURCE_REF"

@@ -41,9 +41,13 @@ the curator extra instructions for one release, run
 `npm run deploy -- --notes-instructions "…"` or set
 `RELEASE_NOTES_INSTRUCTIONS`.
 
-After validation, the workflow records the version and notes on `dev`, creates
-an immutable tag, and fast-forwards `main`. Installer jobs build from that
-promoted commit. Validation failure creates no release metadata or tag.
+When it starts, the workflow records the version and notes in a
+`chore(release): cut X.Y.Z` commit on `dev` and validates that exact commit.
+Merges may keep landing on `dev` while it runs. After validation it tags the
+release commit (tags are immutable) and fast-forwards `main` to it, leaving
+later `dev` commits for the next release. Installer jobs build from that
+promoted commit. Validation failure creates no tag; the next release reverts
+the untagged cut before choosing its version.
 
 Installers and update feeds are published to R2; the workflow does not create
 a GitHub Release. Payloads precede the `latest.json` update. When `CDN_BASE_URL`
