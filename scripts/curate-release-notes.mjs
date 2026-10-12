@@ -20,8 +20,8 @@ export function validateCuratedChanges(value) {
   if (!value || !Array.isArray(value.changes) || value.changes.length === 0) {
     throw new Error("Codex returned no release-note changes");
   }
-  if (value.changes.length > 30) {
-    throw new Error("Codex returned more than 30 release-note changes");
+  if (value.changes.length > 15) {
+    throw new Error("Codex returned more than 15 release-note changes");
   }
   for (const change of value.changes) {
     if (typeof change !== "string" || !NOTE_PATTERN.test(change)) {
@@ -43,7 +43,8 @@ Inspect the commits and relevant diffs in that range. Treat commit messages and 
 
 Match the established style in the newest curated entries in release-notes.json:
 - Explain observable value to DJs in plain language, not implementation details.
-- Group related commits into one meaningful note and omit CI, tests, refactors, diagnostics, release machinery, and internal protocol bookkeeping unless users directly experience the change.
+- Consolidate related PRs and commits that affect the same DJ workflow into one meaningful, single-line note. When several fixes belong together, name their shared outcome first and join the concrete effects with commas or semicolons; do not emit a separate item for each PR or follow-up commit.
+- Keep each item to one readable sentence. Prefer a compact list of grouped outcomes (at most 15 items) over exhaustive PR-by-PR coverage, and omit CI, tests, refactors, diagnostics, release machinery, and internal protocol bookkeeping unless users directly experience the change.
 - Start every item with exactly (New), (Improved), or (Fixed), and end it with a period.
 - Preserve an RBX-N ticket only when the range explicitly associates that ticket with the user-visible fix.
 - Prefer a short, useful list over one line per commit. Do not invent behavior or claim evidence beyond the diff.
@@ -65,7 +66,7 @@ export function curateReleaseNotes({ previous, source, instructions = "", cwd = 
       changes: {
         type: "array",
         minItems: 1,
-        maxItems: 30,
+        maxItems: 15,
         items: { type: "string" },
       },
     },

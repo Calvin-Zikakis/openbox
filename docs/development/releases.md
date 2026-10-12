@@ -13,7 +13,9 @@ The version is recorded in `Cargo.toml` (`[workspace.package]`), `package.json`,
 and `src-tauri/tauri.conf.json`. `node scripts/sync-version.mjs --version X.Y.Z`
 updates these files and workspace crate versions in `Cargo.lock`.
 `release-notes.json` contains app-visible notes prefixed with `(New)`,
-`(Improved)`, or `(Fixed)`.
+`(Improved)`, or `(Fixed)`. The curator consolidates related PRs into compact,
+single-line outcomes (up to 15 per release), rather than listing each PR or
+follow-up separately.
 
 `pnpm dev` first synchronizes the version from the newest merged `v*` tag.
 It can reset an untagged version bump, so review incidental version changes
