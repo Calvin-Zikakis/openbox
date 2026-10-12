@@ -58,6 +58,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          shared-key: clippy-linux
 
       - name: Resolve affected packages
         env:

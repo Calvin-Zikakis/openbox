@@ -115,6 +115,14 @@ jobs:
           toolchain: 1.99.0
           components: clippy
 
+      # Same key as the Rust lane's Clippy job, so this run starts from a warm
+      # target directory instead of recompiling every dependency.
+      - uses: Swatinem/rust-cache@v2
+        if: needs.changes.outputs.rust == 'true'
+        with:
+          cache-bin: false
+          shared-key: clippy-linux
+
       # Fix only the packages the Rust lane will lint, and leave enforcement
       # (-D warnings) to that lane so Clippy gates the PR exactly once.
       - name: Apply Clippy's machine-applicable fixes
