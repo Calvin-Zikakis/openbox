@@ -77,6 +77,7 @@ pub fn build(dir: &Path, shape: Shape) -> Result<LibraryLocation> {
 
     let conn = Connection::open(&master_db)
         .map_err(|e| DbError::Open(format!("{}: {e}", master_db.display())))?;
+    crate::cipher::ready()?;
     conn.pragma_update(None, "cipher", "sqlcipher")?;
     conn.pragma_update(None, "legacy", 4)?;
     conn.pragma_update(None, "key", FIXTURE_PASSPHRASE)?;
@@ -340,6 +341,7 @@ fn mark_changed(conn: &Connection, index: usize) -> Result<()> {
 fn open_fixture(location: &LibraryLocation) -> Result<Connection> {
     let conn = Connection::open(&location.master_db)
         .map_err(|e| DbError::Open(format!("{}: {e}", location.master_db.display())))?;
+    crate::cipher::ready()?;
     conn.pragma_update(None, "cipher", "sqlcipher")?;
     conn.pragma_update(None, "legacy", 4)?;
     conn.pragma_update(None, "key", &location.passphrase)?;

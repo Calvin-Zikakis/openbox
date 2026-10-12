@@ -11,6 +11,7 @@
 //!   database path is refused outright, so a test can never write to the
 //!   user's library even by mistake.
 
+pub mod cipher;
 pub mod details;
 pub mod dropbox;
 pub mod export_info;
@@ -295,6 +296,7 @@ impl Library {
             .map_err(|e| DbError::Open(format!("{}: {e}", location.master_db.display())))?;
 
         // Order matters: cipher settings must precede the key.
+        cipher::ready()?;
         conn.pragma_update(None, "cipher", "sqlcipher")?;
         conn.pragma_update(None, "legacy", 4)?;
         conn.pragma_update(None, "key", &location.passphrase)?;

@@ -181,6 +181,7 @@ pub fn create(plan: &Plan) -> Result<LibraryLocation> {
 /// this application's writer expect to find.
 fn build(path: &Path, passphrase: &str, share_root: &Path) -> Result<()> {
     let mut conn = Connection::open(path).map_err(|e| DbError::Open(format!("{}: {e}", path.display())))?;
+    crate::cipher::ready()?;
     conn.pragma_update(None, "cipher", "sqlcipher")?;
     conn.pragma_update(None, "legacy", 4)?;
     conn.pragma_update(None, "key", passphrase)?;
