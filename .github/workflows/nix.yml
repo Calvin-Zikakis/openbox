@@ -3,7 +3,9 @@ name: Nix packaging
 # Builds the Nix `bin` package and smoke-tests the AppImage it ships. Every
 # job is gated on the PACKAGING_NIX repository variable, so forks and
 # repositories that do not opt in never run Nix, and the jobs only ever use
-# GitHub-hosted runners.
+# GitHub-hosted runners. build-installer calls this with a read-only token, so
+# no job here may ask for more; the monthly flake.lock push lives in
+# nix-update.yml.
 on:
   workflow_dispatch:
     inputs:
@@ -11,9 +13,6 @@ on:
         description: "Published version to smoke-test (blank uses packaging/nix/pin.json)"
         required: false
         type: string
-  schedule:
-    # Monthly: refresh flake.lock and confirm the current seed still runs.
-    - cron: "0 6 1 * *"
   workflow_call:
     inputs:
       artifact:
@@ -34,7 +33,7 @@ env:
 jobs:
   smoke:
     name: AppImage smoke test
-    if: vars.PACKAGING_NIX == 'true' && github.event_name != 'schedule'
+    if: vars.PACKAGING_NIX == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,47 +75,3 @@ jobs:
         uses: ./.github/actions/nix-smoke
         with:
           appimage: ${{ steps.resolve.outputs.appimage }}
-
-  update:
-    name: Refresh flake.lock
-    if: vars.PACKAGING_NIX == 'true' && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: dev
-          fetch-depth: 0
-          persist-credentials: true
-
-      - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: Update flake.lock
-        run: nix flake update
-
-      - name: Smoke-test the packaged AppImage
-        uses: ./.github/actions/nix-smoke
-
-      - name: Push the refreshed lock
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- flake.lock; then
-            echo "flake.lock is already current"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for attempt in 1 2 3 4 5; do
-            git add flake.lock
-            git commit -m "chore(nix): update flake.lock" \
-              -m "Monthly nix flake update, validated by the bin smoke test."
-            if git push origin HEAD:dev; then exit 0; fi
-            git fetch origin dev
-            git rebase origin/dev
-          done
-          echo "::error::could not push the refreshed flake.lock"
-          exit 1
