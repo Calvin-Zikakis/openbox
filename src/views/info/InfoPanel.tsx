@@ -43,6 +43,7 @@ import {
   ArtworkDeleteIcon, ArtworkImportIcon, ClearCircleIcon, RecordIcon, ReloadIcon, SpinnerIcon,
 } from "@/components/icons";
 import { getBackend } from "@/ipc/client";
+import { FIELD_LABEL } from "./fieldLabel";
 import type { Backend, RowDto, SelectionDetails, TrackDetails, TrackField, TrackLookups } from "@/ipc/types";
 import { RatingStar } from "@/components/RatingStar";
 import { useTranslation } from "@/i18n";
@@ -330,25 +331,6 @@ interface InfoFormProps {
   onEdit: (what: string, edit: (b: Backend) => Promise<unknown>) => Promise<void>;
 }
 
-/** The Info tab's labels, from `german.lang`. */
-/** What each field is called, for the line the status bar says after a save. */
-export const FIELD_LABEL: Record<TrackField, string> = {
-  title: "Track Title",
-  artist: "Artist",
-  album: "Album",
-  year: "Year",
-  trackNumber: "Track number",
-  discNumber: "Disc number",
-  originalArtist: "Original Artist",
-  composer: "Composer",
-  remixer: "Remixer",
-  lyricist: "Lyricist",
-  playCount: "DJ Play Count",
-  genre: "Genre",
-  label: "Label",
-  key: "Key",
-  bpm: "BPM",
-};
 
 function InfoForm({ view, lookups, readOnly, onRate, onComment, onEdit }: InfoFormProps) {
   const { ids, text } = view;
