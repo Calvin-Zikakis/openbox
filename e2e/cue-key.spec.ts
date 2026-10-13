@@ -136,6 +136,10 @@ test("Space after a held preview ran out at the end stays there when C is releas
   // C held past the end, Space, C released: the deck stays at 02:52.4. With
   // no Space, the same release goes back to 02:51.1.
   await page.goto("/");
+  // From the Collection, which 1 PLAYER does not go on from at the end; the
+  // list "/" opens is a playlist, whose next row would load and play.
+  await page.getByRole("treeitem", { name: "All Tracks" }).click();
+  await expect(page.getByTestId("browser-title")).toContainText("All Tracks");
   await page.locator('[role="gridcell"][data-col="title"]').first().dblclick();
   const play = page.getByRole("button", { name: "Play", exact: true });
   await expect(play).toBeEnabled();

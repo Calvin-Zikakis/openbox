@@ -165,8 +165,12 @@ test("the right playlist owns its track actions and drives Information", async (
   // A right-side selection is the active selection for Information.
   await page.getByRole("toolbar", { name: "Browser panels" })
     .getByRole("button", { name: "Information" }).click();
-  await rightRows.first().locator('[data-col="title"]').click();
+  // The panel loads on first open and narrows the right grid when it lands;
+  // clicking before then leaves the title cell part-scrolled, and the next
+  // right-click's focus scroll would close the Track menu.
   const info = page.getByRole("complementary", { name: "Information" });
+  await expect(info).toBeVisible();
+  await rightRows.first().locator('[data-col="title"]').click();
   await expect(info.getByText(title, { exact: true }).first()).toBeVisible();
 
   // The menu must mutate the right-side source, not silently do nothing or

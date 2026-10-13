@@ -205,8 +205,10 @@ test("the control row loops the chosen number of beats, and the steps resize it"
   await row.getByRole("button", { name: "Loop in" }).click();
   await page.waitForTimeout(1_500);
   await row.getByRole("button", { name: "Loop out" }).click();
-  await expect(exit).toHaveAttribute("aria-pressed", "true");
   await expect(a.getByTestId("player-overview").locator('[class*="loopBand"][data-active]')).toHaveCount(1);
+  // The field lights for the auto beat loop only, so a manual loop leaves it
+  // unlit (rekordbox's LoopController::updateLoopState; see Player's beatLoop).
+  await expect(exit).toHaveAttribute("aria-pressed", "false");
 });
 
 // rekordbox 7.2.11's AutoBeatLoopController labels, which ‹ and › step
