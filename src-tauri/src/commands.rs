@@ -3246,7 +3246,7 @@ async fn import_files_then<R: tauri::Runtime>(
                             tracks.push(crate::dto::ImportedTrackDto { id, title });
                         }
                         rbl_db::write::ImportOutcome::Refused(reason) => {
-                            skipped.push(format!("{}: {reason}", file.display()));
+                            skipped.push(rbl_db::write::skipped_file(file, &reason));
                         }
                     }
                 }

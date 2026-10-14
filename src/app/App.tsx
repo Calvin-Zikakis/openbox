@@ -3,6 +3,7 @@ import type { DuplicateAnswer } from "@/components/DuplicateTracksDialog";
 import type { FolderClashAnswer } from "@/lib/folderDrop";
 import { JobQueue, slices, type JobView } from "@/lib/jobQueue";
 import { importInSlices, removeInSlices } from "@/lib/bulkJobs";
+import { skippedTail } from "@/lib/importSkips";
 import { useBackupProgress } from "@/store/useBackupProgress";
 import { useExportProgress } from "@/store/useExportProgress";
 import { isExportActive } from "@/lib/exportProgress";
@@ -1072,8 +1073,7 @@ function AppBody() {
           // them [OBS 7, Winrig 2026-10-08].
           const { ids: trackIds, report: imported } = await importLoose(ids, (paths) => backend.importPaths(paths));
           if (imported && analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
-          const skipped = imported?.skipped.length ?? 0;
-          const tail = skipped > 0 ? `; ${skipped} skipped` : "";
+          const tail = skippedTail(imported?.skipped ?? []);
           if (trackIds.length === 0) {
             refuse(`Nothing added to ${name}${tail}.`);
             return;
@@ -1209,7 +1209,7 @@ function AppBody() {
           setTree(await backend.playlistTree());
           if (analysisPrefs.auto && fresh.length > 0) analysis.add(fresh);
           const already = existing > 0 ? `; ${existing} already in the library` : "";
-          const left = skipped > 0 ? `; ${skipped} skipped` : "";
+          const left = skippedTail(skipped);
           report(signal.aborted
             ? `Stopped: ${noun(added)} added to ${name}${left}${already}.`
             : `Added ${noun(added)} to ${name}${left}${already}.`);
@@ -1872,14 +1872,12 @@ function AppBody() {
           }
           if (analysisPrefs.auto && imported.tracks.length > 0) analysis.add(imported.tracks);
           const values = {
-            imported: imported.imported, total: imported.imported + imported.skipped,
-            skipped: imported.skipped, existing: imported.existing, count: paths.length,
+            imported: imported.imported, total: imported.imported + imported.skipped.length,
+            existing: imported.existing, count: paths.length,
           };
           const said = signal.aborted
             ? t("Stopped: imported {imported} of {count} files.", values)
-            : imported.skipped === 0
-              ? `Imported ${values.imported} of ${values.total} files`
-              : `Imported ${values.imported} of ${values.total} files; ${values.skipped} skipped`;
+            : `Imported ${values.imported} of ${values.total} files${skippedTail(imported.skipped)}`;
           const already = imported.existing > 0 ? `; ${imported.existing} already in the library` : "";
           await afterWrite(signal.aborted ? said : `${said}${already}.`);
         },
@@ -2136,11 +2134,7 @@ function AppBody() {
         }
         const total = imported.imported + imported.skipped.length;
         const already = imported.existing.length > 0 ? `; ${imported.existing.length} already in the library` : "";
-        report(
-          imported.skipped.length === 0
-            ? `Imported ${imported.imported} of ${total} files${already}.`
-            : `Imported ${imported.imported} of ${total} files; ${imported.skipped.length} skipped${already}.`,
-        );
+        report(`Imported ${imported.imported} of ${total} files${skippedTail(imported.skipped)}${already}.`);
         setTree(await backend.playlistTree());
         // Auto Analysis in Preferences: what just landed goes straight into
         // the queue, as rekordbox does unless told not to.

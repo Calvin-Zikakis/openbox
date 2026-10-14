@@ -18,7 +18,8 @@ export interface SlicedImport {
   /** Files sent to the backend, which is all of them unless it was stopped. */
   reached: number;
   imported: number;
-  skipped: number;
+  /** Each file left out, as "file name: reason". */
+  skipped: string[];
   existing: number;
   /** The tracks that were added, for Auto Analysis. */
   tracks: ImportReport["tracks"];
@@ -38,13 +39,13 @@ export async function importInSlices(
   progress: (reached: number, sofar: SlicedImport) => void = () => undefined,
   size = IMPORT_SLICE,
 ): Promise<SlicedImport> {
-  const done: SlicedImport = { reached: 0, imported: 0, skipped: 0, existing: 0, tracks: [], ids: [] };
+  const done: SlicedImport = { reached: 0, imported: 0, skipped: [], existing: 0, tracks: [], ids: [] };
   for (const slice of slices(files, size)) {
     if (signal.aborted) break;
     const result = await importSlice(slice);
     done.reached += slice.length;
     done.imported += result.imported;
-    done.skipped += result.skipped.length;
+    done.skipped.push(...result.skipped);
     done.existing += result.existing.length;
     done.tracks.push(...result.tracks);
     // Files the library already held still stand for their tracks.

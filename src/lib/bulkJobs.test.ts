@@ -75,7 +75,7 @@ describe("importInSlices", () => {
     const files = [...ids(150, "a"), "notes.txt", "held"];
     const lib = library(["held"]);
     const done = await importInSlices(files, lib.importSlice, new AbortController().signal);
-    expect(done).toMatchObject({ reached: 152, imported: 150, skipped: 1, existing: 1 });
+    expect(done).toMatchObject({ reached: 152, imported: 150, skipped: ["notes.txt: not audio"], existing: 1 });
     expect(done.ids).toEqual([...ids(150, "a"), "held"]);
     expect(done.tracks).toHaveLength(150);
   });

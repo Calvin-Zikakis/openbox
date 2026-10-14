@@ -76,7 +76,7 @@ export async function importFolderDrop(
   const replaced: { name: string; lists: number; tracks: number }[] = [];
   const tracks: { id: string; title: string }[] = [];
   let folders = 0;
-  let skipped = 0;
+  const skipped: string[] = [];
   let kept = 0;
   let at: number | null = null;
   let done = 0;
@@ -112,7 +112,7 @@ export async function importFolderDrop(
         if (result.replaced) replaced.push({ name: result.name, ...result.replaced });
       }
       tracks.push(...result.tracks);
-      skipped += result.skipped.length;
+      skipped.push(...result.skipped);
     } finally {
       done += 1;
       progress(done);
@@ -130,9 +130,10 @@ export async function importFolderDrop(
       { name, lists, tracks },
     )}`)
     .join("");
-  const tail = skipped === 0
+  // The first skipped file and why, so a lone skip explains itself.
+  const tail = skipped.length === 0
     ? ""
-    : ` ${skipped === 1 ? t("1 file skipped.") : t("{count} files skipped.", { count: skipped })}`;
+    : ` ${skipped.length === 1 ? t("1 file skipped.") : t("{count} files skipped.", { count: skipped.length })} ${skipped[0]}.`;
   const message = made.length === 0
     ? `${kept > 0 || signal?.aborted ? t("No playlist was made.") : t("No playlist was made: the folders hold no audio files.")}${tail}`
     : `${t("Made playlists: {names}.", { names: made.join(", ") })}${replacements}${copies}${tail}`;

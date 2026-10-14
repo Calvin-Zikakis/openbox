@@ -1112,7 +1112,7 @@ impl Writer {
                     members.push(content);
                 }
                 ImportOutcome::Refused(reason) => {
-                    outcome.skipped.push(format!("{}: {reason}", file.display()));
+                    outcome.skipped.push(skipped_file(file, &reason));
                 }
             }
         }
@@ -3447,6 +3447,15 @@ impl Writer {
     }
 }
 
+/// One line of an import report for a file left out: its name, then why.
+/// The whole path goes to the log, so a skip can be traced after the status
+/// line has cleared.
+pub fn skipped_file(file: &Path, reason: &str) -> String {
+    tracing::warn!(path = %file.display(), reason, "import skipped a file");
+    let name = file.file_name().map_or_else(|| file.display().to_string(), |n| n.to_string_lossy().into_owned());
+    format!("{name}: {reason}")
+}
+
 /// Reads the tags of every path, on as many threads as the machine has cores
 /// (up to eight). Reading a file's tags is disk and decode work that touches
 /// no database, so it is the one part of an import that can overlap.
@@ -3563,7 +3572,7 @@ fn insert_files(
         let tags = match tags {
             Ok(tags) => tags,
             Err(e) => {
-                outcomes.push(ImportOutcome::Refused(e.to_string()));
+                outcomes.push(ImportOutcome::Refused(e.reason()));
                 continue;
             }
         };

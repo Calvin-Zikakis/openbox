@@ -178,6 +178,19 @@ pub enum ImportError {
     Unreadable { path: String, reason: String },
 }
 
+impl ImportError {
+    /// What went wrong, without the path, for a report that names the file
+    /// itself.
+    #[must_use]
+    pub fn reason(&self) -> String {
+        match self {
+            Self::NotAFile(_) => "not a file".to_owned(),
+            Self::UnsupportedFormat { .. } => self.to_string(),
+            Self::Unreadable { reason, .. } => format!("its tags could not be read: {reason}"),
+        }
+    }
+}
+
 /// Whether a path looks like something worth importing.
 #[must_use]
 pub fn is_audio(path: &Path) -> bool {
