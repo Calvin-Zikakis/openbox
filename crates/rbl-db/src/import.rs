@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use lofty::config::ParseOptions;
+use lofty::config::{ParseOptions, ParsingMode};
 use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
 use lofty::prelude::{ItemKey, TagExt};
 use lofty::probe::Probe;
@@ -263,16 +263,28 @@ fn walk(dir: &Path, depth: usize, budget: &mut WalkBudget, files: &mut Vec<std::
     }
 }
 
-/// Reads embedded artwork separately from the fast Explorer tag probe.
-/// Prefer a front cover across all tags, then the first available picture.
-pub fn read_artwork(path: &Path) -> Result<Option<Vec<u8>>, ImportError> {
-    let tagged = Probe::open(path)
-        .map(|probe| probe.options(ParseOptions::new().read_properties(false)))
-        .and_then(Probe::read)
+/// Opens a file's tags, reading past a frame lofty cannot parse.
+///
+/// lofty's default mode fails the whole read on one malformed frame, such as
+/// an ID3v2.3 `TYER` of "826" [OBS 2026-10-14, a downloaded MP3]. That file
+/// plays, so it is read again in relaxed mode, which leaves the bad field
+/// empty. The first error is the one reported if both reads fail.
+fn read_tagged(path: &Path, options: ParseOptions) -> Result<TaggedFile, ImportError> {
+    let read = |options: ParseOptions| Probe::open(path).map(|probe| probe.options(options)).and_then(Probe::read);
+    let mut relaxed = options;
+    relaxed.parsing_mode(ParsingMode::Relaxed);
+    read(options)
+        .or_else(|first| read(relaxed).map_err(|_| first))
         .map_err(|e| ImportError::Unreadable {
             path: path.display().to_string(),
             reason: e.to_string(),
-        })?;
+        })
+}
+
+/// Reads embedded artwork separately from the fast Explorer tag probe.
+/// Prefer a front cover across all tags, then the first available picture.
+pub fn read_artwork(path: &Path) -> Result<Option<Vec<u8>>, ImportError> {
+    let tagged = read_tagged(path, ParseOptions::new().read_properties(false))?;
     let pictures = || tagged.tags().iter().flat_map(lofty::tag::Tag::pictures);
     Ok(pictures()
         .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
@@ -304,13 +316,7 @@ pub fn read_tags(path: &Path) -> Result<TrackTags, ImportError> {
     // disk and 56 ms cold from an SD card against under a millisecond
     // without [OBS], which is the difference between an Explorer page that
     // lands and one that stalls.
-    let tagged = Probe::open(path)
-        .map(|probe| probe.options(ParseOptions::new().read_cover_art(false)))
-        .and_then(lofty::probe::Probe::read)
-        .map_err(|e| ImportError::Unreadable {
-            path: path.display().to_string(),
-            reason: e.to_string(),
-        })?;
+    let tagged = read_tagged(path, ParseOptions::new().read_cover_art(false))?;
 
     let properties = tagged.properties();
     let mut tags = TrackTags {
@@ -462,6 +468,40 @@ mod tests {
             out.resize(start + 417, 0);
         }
         std::fs::write(path, out).unwrap();
+    }
+
+    /// An ID3v2.3 tag of text frames, each in ISO-8859-1.
+    fn id3v23(frames: &[(&[u8; 4], &str)]) -> Vec<u8> {
+        let mut body = Vec::new();
+        for (id, text) in frames {
+            body.extend_from_slice(*id);
+            body.extend_from_slice(&u32::try_from(text.len() + 1).unwrap().to_be_bytes());
+            body.extend_from_slice(&[0, 0, 0]);
+            body.extend_from_slice(text.as_bytes());
+        }
+        let size = u32::try_from(body.len()).unwrap();
+        let synchsafe = [(size >> 21) & 0x7F, (size >> 14) & 0x7F, (size >> 7) & 0x7F, size & 0x7F].map(|b| u8::try_from(b).unwrap());
+        let mut tag = b"ID3\x03\x00\x00".to_vec();
+        tag.extend_from_slice(&synchsafe);
+        tag.extend(body);
+        tag
+    }
+
+    #[test]
+    fn a_malformed_year_leaves_the_year_empty_rather_than_refusing_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Project X50 - North Sea Crown VIP.mp3");
+        write_mp3(&path);
+        let audio = std::fs::read(&path).unwrap();
+        // A three-digit year, as on a downloaded MP3; lofty's default mode
+        // refuses the whole tag over it.
+        let mut file = id3v23(&[(b"TPE1", "Pete Fox"), (b"TIT2", "North Sea Crown (VIP)"), (b"TYER", "826")]);
+        file.extend(audio);
+        std::fs::write(&path, file).unwrap();
+
+        let tags = read_tags(&path).unwrap();
+        assert_eq!((tags.title.as_str(), tags.artist.as_str(), tags.year), ("North Sea Crown (VIP)", "Pete Fox", 0));
+        assert!(read_artwork(&path).unwrap().is_none());
     }
 
     /// One second of 16-bit mono silence.
