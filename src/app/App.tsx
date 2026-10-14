@@ -595,14 +595,19 @@ function AppBody() {
   const analysisHeld = jobList.some((job) => job.holdsAnalysis && job.state !== "queued");
   const analysis = useAnalysis(
     useCallback((id: string, result: AnalysisResult) => {
-      setPendingEdits((edits) =>
-        new Map(edits).set(id, {
-          analysed: result.analysed ?? 1,
-          bpmX100: result.bpmX100,
-          key: result.key,
-          durationSec: result.durationSec,
-        }),
-      );
+      const found = {
+        analysed: result.analysed ?? 1,
+        bpmX100: result.bpmX100,
+        key: result.key,
+        durationSec: result.durationSec,
+      };
+      setPendingEdits((edits) => new Map(edits).set(id, found));
+      // A deck holds the row it was loaded with: one holding this track
+      // takes the answer too, so it draws the new waveform and shows the
+      // tempo and key.
+      const update = (row: RowDto | null) => (row?.id === id ? { ...row, ...found } : row);
+      setPlayerTrack(update);
+      setPlayerTrackB(update);
     }, []),
     useCallback(() => {
       void getBackend().then((backend) => backend.reloadLibrary());
@@ -1265,16 +1270,21 @@ function AppBody() {
    * is there, else shows `kPlayerOperateErrorLoadMissingFile`, "Load error.
    * The file could not be found.", @0x101abb0f4 and returns].
    */
-  const deckLoaders = useMemo(() => {
-    const guard = (set: (row: RowDto | null) => void) => (row: RowDto | null) => {
-      if (row?.missing === true) {
-        refuse(t("Load error. The file could not be found."));
-        return;
-      }
-      set(row);
-    };
-    return { a: guard(setPlayerTrack), b: guard(setPlayerTrackB) };
-  }, [refuse, t]);
+  const loadOnto = useEventCallback((set: (row: RowDto | null) => void, row: RowDto | null) => {
+    if (row?.missing === true) {
+      refuse(t("Load error. The file could not be found."));
+      return;
+    }
+    // What this session has written to the row since the list read it, an
+    // analysis among it: the library is re-read only once a run is over.
+    const edits = row ? pendingEdits.get(row.id) : undefined;
+    const current = row && edits ? { ...row, ...edits } : row;
+    set(current);
+  });
+  const deckLoaders = useMemo(() => ({
+    a: (row: RowDto | null) => loadOnto(setPlayerTrack, row),
+    b: (row: RowDto | null) => loadOnto(setPlayerTrackB, row),
+  }), [loadOnto]);
 
   /**
    * Loading a dragged track into a deck.

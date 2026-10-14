@@ -201,11 +201,11 @@ fn analyse_and_save(
     // The files: where the row already points, or the UUID-derived place
     // rekordbox uses for desktop-library analysis [OBS: rbl-db::write].
     let relative = {
-        let current = library.analysis_path.get(row);
+        let current = state.analysis_path_of(library, row, track_id);
         if current.is_empty() {
             state.write(|writer| writer.analysis_data_path_for(track_id)).map_err(write_error)?
         } else {
-            current.to_owned()
+            current
         }
     };
     let dat = rbl_anlz::resolve(share, &relative);
@@ -248,6 +248,7 @@ fn analyse_and_save(
     let length_sec = Some(duration_sec);
 
     save_analysis_files(state, &location, track_id, &dat, files, bpm_x100, detected_key.as_deref(), &relative, length_sec, editor)?;
+    state.note_analysis(track_id, &relative);
     let added_first_beat_cue = match beats.first() {
         Some(first) if settings.first_beat_cue => add_first_beat_cue(state, library, track_id, first.time_ms)?,
         _ => false,
@@ -449,7 +450,7 @@ fn analyse_key_only(state: &AppState, library: &rbl_index::Library, row: usize, 
         peak: audio.samples.iter().fold(0.0_f32, |peak, sample| peak.max(sample.abs())),
         duration_sec: library.length_sec.get(row).copied().unwrap_or(0),
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        analysis_path: library.analysis_path.get(row).to_owned(),
+        analysis_path: state.analysis_path_of(library, row, track_id),
         added_first_beat_cue: false,
         detected_key: found_key,
     })
@@ -484,11 +485,11 @@ pub async fn edit_phrase<R: tauri::Runtime>(
         let Some(row) = library.row_of(&track_id) else {
             return Err(AppError::new(ErrorKind::NotFound, "That track is not in the library."));
         };
-        let relative = library.analysis_path.get(row as usize);
+        let relative = state.analysis_path_of(&library, row as usize, &track_id);
         if relative.is_empty() {
             return Err(AppError::new(ErrorKind::NotFound, "That track has no analysis."));
         }
-        let ext = rbl_anlz::sibling(&rbl_anlz::resolve(&share, relative), "EXT");
+        let ext = rbl_anlz::sibling(&rbl_anlz::resolve(&share, &relative), "EXT");
         let _edit_guard = state.edit_gate.lock();
         let _files = state.analysis_write.lock();
         let file = rbl_anlz::Anlz::read(&ext).map_err(|e| {
@@ -589,6 +590,56 @@ mod tests {
         out.extend_from_slice(&data_len.to_le_bytes());
         out.extend_from_slice(&data);
         std::fs::write(path, out).unwrap();
+    }
+
+    /// A fixture library whose first track is a 20-second click track that
+    /// has never been analysed, indexed as such.
+    fn unanalysed_click_track(dir: &std::path::Path) -> (AppState, rbl_db::LibraryLocation) {
+        use rbl_db::fixture::{self, track_id, Shape};
+        use rbl_db::{Library as Db, OpenMode};
+
+        let location = fixture::build(dir, Shape::default()).expect("build the fixture");
+        let audio = dir.join("click.wav");
+        write_click_wav(&audio, 20, 0.5);
+        fixture::point_at_audio(&location, 0, audio.to_str().unwrap(), 20).unwrap();
+        let db = Db::open(location.clone(), OpenMode::ReadWrite).unwrap();
+        db.connection()
+            .execute("UPDATE djmdContent SET Analysed = 0, AnalysisDataPath = '', ImagePath = '', ContentLink = NULL WHERE ID = ?1", [track_id(0)])
+            .unwrap();
+        let (library, _) = rbl_index::load(&db).unwrap();
+        let state = AppState::with_backups(dir.join("backups"));
+        state.set_library(library, false, None, 0, location.clone());
+        crate::backups::create(&state).unwrap();
+        (state, location)
+    }
+
+    /// The index is re-read only once an analysis run is over. Until then a
+    /// deck holding a track the run has analysed still reads its waveform.
+    #[test]
+    fn a_track_analysed_since_the_index_was_read_is_drawn_before_the_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location) = unanalysed_click_track(dir.path());
+        let share = location.share_root.clone();
+        let library = state.library().unwrap();
+        let editor = crate::grid::GridEditor::at(&dir.path().join("editor"));
+        let track = rbl_db::fixture::track_id(0);
+        let read = |library: &rbl_index::Library| crate::commands::waveform_bytes(&state, library, &share, &track, "bandsDetail", None, None).unwrap();
+        assert!(read(&library).is_empty(), "unanalysed, the deck has nothing to draw");
+
+        let result = analyse_and_save(&state, &library, &share, &track, rbl_analysis::AnalysisPreset::Rbxport,
+            &AnalysisSettings::default(), &editor).expect("analysed");
+        let dat = rbl_anlz::resolve(&share, &result.analysis_path);
+        let written = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "2EX")).unwrap().waveform(b"PWV7").unwrap().1.to_vec();
+        assert_eq!(library.analysis_path.get(library.row_of(&track).unwrap() as usize), "", "the index has not been re-read");
+        assert_eq!(read(&library), written, "but the deck reads the new waveform");
+        assert!(crate::grid::state_with(&editor, &library, &share, &track, state.registered_analysis(&track).as_deref()).is_ok(),
+            "and the grid panel the new grid");
+
+        let db = rbl_db::Library::open(location.clone(), rbl_db::OpenMode::ReadOnly).unwrap();
+        let (reloaded, _) = rbl_index::load(&db).unwrap();
+        state.set_library(reloaded, false, None, 0, location);
+        assert_eq!(state.registered_analysis(&track), None, "the reloaded index has it, so the note is dropped");
+        assert_eq!(read(&state.library().unwrap()), written);
     }
 
     #[test]

@@ -45,6 +45,11 @@ pub struct AppState {
     /// a track loaded onto a deck still finds its waveform after the tree
     /// moves on. See [`crate::device_library::DeviceAssets`].
     device_assets: RwLock<HashMap<String, crate::device_library::DeviceAssets>>,
+    /// Analysis registered since the index was read: each track's
+    /// share-relative `.DAT`, by id. The index is re-read once an analysis
+    /// run is over, not per track, so until then this is how a deck finds the
+    /// waveform, grid and phrases of a track analysed while it was loaded.
+    fresh_analysis: parking_lot::Mutex<HashMap<String, String>>,
 }
 
 /// One reversible library operation. Grid edits keep their own history because
@@ -176,6 +181,7 @@ impl AppState {
             reader: parking_lot::Mutex::new(None),
             missing_scan: parking_lot::Mutex::new(None),
             device_assets: RwLock::new(HashMap::new()),
+            fresh_analysis: parking_lot::Mutex::new(HashMap::new()),
         }
     }
 
@@ -339,6 +345,11 @@ impl AppState {
         // and opening reads `inner`, so taking them the other way round here
         // would be a deadlock waiting for a reload during a point read.
         *self.reader.lock() = None;
+        // What the new index holds now needs no overlay. An analysis that
+        // landed after this read began is not in it, so its entry stays.
+        self.fresh_analysis.lock().retain(|track, _| {
+            library.row_of(track).is_some_and(|row| library.analysis_path.get(row as usize).is_empty())
+        });
         let mut inner = self.inner.write();
         inner.library = Some(Arc::new(library));
         inner.library_problem = None;
@@ -355,6 +366,27 @@ impl AppState {
         if let Some(session) = inner.link.as_ref() {
             session.analysis_changed();
         }
+    }
+
+    /// A track's share-relative analysis `.DAT`, empty when it has none: the
+    /// index's, or one registered since the index was read.
+    pub(crate) fn analysis_path_of(&self, library: &Library, row: usize, track: &str) -> String {
+        let indexed = library.analysis_path.get(row);
+        if !indexed.is_empty() {
+            return indexed.to_owned();
+        }
+        self.registered_analysis(track).unwrap_or_default()
+    }
+
+    /// A track's analysis `.DAT` when it was registered after the index was
+    /// read, which the index does not show yet.
+    pub(crate) fn registered_analysis(&self, track: &str) -> Option<String> {
+        self.fresh_analysis.lock().get(track).cloned()
+    }
+
+    /// Notes that `track`'s row now names the analysis at `relative`.
+    pub(crate) fn note_analysis(&self, track: &str, relative: &str) {
+        self.fresh_analysis.lock().insert(track.to_owned(), relative.to_owned());
     }
 
     /// Why the library is not loaded, when a load has failed.

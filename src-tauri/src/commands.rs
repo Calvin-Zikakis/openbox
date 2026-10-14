@@ -488,12 +488,14 @@ pub async fn track_waveform(
             .ok_or(error),
     };
     let share = state.share_root();
-    blocking("track_waveform", move || waveform_bytes(&library, &share, &track_id, &kind, from, len))
+    let state = Arc::clone(&state);
+    blocking("track_waveform", move || waveform_bytes(&state, &library, &share, &track_id, &kind, from, len))
         .await
         .map(tauri::ipc::Response::new)
 }
 
 pub(crate) fn waveform_bytes(
+    state: &AppState,
     library: &Library,
     share: &std::path::Path,
     track_id: &str,
@@ -512,12 +514,12 @@ pub(crate) fn waveform_bytes(
     let Some(row) = library.row_of_id(numeric).map(|row| row as usize) else {
         return Ok(Vec::new());
     };
-    let analysis_path = library.analysis_path.get(row);
+    let analysis_path = state.analysis_path_of(library, row, track_id);
     if analysis_path.is_empty() {
         return Ok(Vec::new());
     }
 
-    Ok(waveform_of(&rbl_anlz::resolve(share, analysis_path), kind, from, len))
+    Ok(waveform_of(&rbl_anlz::resolve(share, &analysis_path), kind, from, len))
 }
 
 /// One kind of waveform from the analysis files beside `dat`, windowed.
@@ -557,7 +559,7 @@ fn analysis_dat(state: &AppState, track: &str) -> AppResult<Option<std::path::Pa
     }
     let library = state.library()?;
     let Some(row) = library.row_of(track) else { return Ok(None) };
-    let relative = library.analysis_path.get(row as usize);
+    let relative = state.analysis_path_of(&library, row as usize, track);
     // Either slash: `read_beat_grid` took a leading backslash too, and on
     // Windows a path that keeps one would replace the share root.
     Ok((!relative.is_empty()).then(|| state.share_root().join(relative.trim_start_matches(['/', '\\']))))

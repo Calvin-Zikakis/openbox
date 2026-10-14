@@ -72,6 +72,7 @@ pub fn save(app: &tauri::AppHandle) {
             }
         }
         if let Ok(bytes) = crate::commands::waveform_bytes(
+            &state,
             &library,
             &share,
             id,

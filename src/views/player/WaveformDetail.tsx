@@ -23,6 +23,12 @@ import { usePreferences } from "@/store/usePreferences";
 const bytesByTrack = new Map<string, Uint8Array>();
 /** In-flight fetches, shared so StrictMode's double effect does not double-fetch. */
 const inFlight = new Map<string, Promise<Uint8Array>>();
+/**
+ * Bumped per track each time its bytes are dropped, so a fetch that set off
+ * before then neither fills the cache nor is shared with a newer request:
+ * the bytes it brings back are the ones the analysis replaced.
+ */
+const editions = new Map<string, number>();
 
 /** Waveform bytes are not interchangeable: PCM is eight bytes per point and
  * PWV7 is three. Keep their format beside the response during a zoom switch. */
@@ -48,17 +54,19 @@ async function load(trackId: string, kind: WaveformKind): Promise<Uint8Array> {
   const existing = inFlight.get(key);
   if (existing) return existing;
 
+  const edition = editions.get(trackId) ?? 0;
+  const current = () => (editions.get(trackId) ?? 0) === edition;
   const pending = (async () => {
     try {
       const backend = await getBackend();
       const data = await backend.trackWaveform(trackId, kind);
-      bytesByTrack.set(key, data);
+      if (current()) bytesByTrack.set(key, data);
       return data;
     } catch {
       // A track without analysis simply stays blank.
       return new Uint8Array();
     } finally {
-      inFlight.delete(key);
+      if (current()) inFlight.delete(key);
     }
   })();
   inFlight.set(key, pending);
@@ -105,8 +113,11 @@ export interface WaveformDetailProps {
 
 /** Drops a track's bytes: its analysis was rewritten. */
 function forget(trackId: string): void {
-  for (const key of [...bytesByTrack.keys()]) {
-    if (key.startsWith(`${trackId}:`)) bytesByTrack.delete(key);
+  editions.set(trackId, (editions.get(trackId) ?? 0) + 1);
+  for (const cache of [bytesByTrack, inFlight]) {
+    for (const key of [...cache.keys()]) {
+      if (key.startsWith(`${trackId}:`)) cache.delete(key);
+    }
   }
 }
 

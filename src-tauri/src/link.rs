@@ -401,9 +401,9 @@ fn save_grid_offset(state: &AppState, track: &str, offset_ms: i16) -> crate::err
     crate::file_journal::recover(state.backup_dir(), &location)?;
     let library = state.library()?;
     let row = library.row_of(track).ok_or_else(|| AppError::new(ErrorKind::NotFound, "Track not found"))?;
-    let relative = library.analysis_path.get(row as usize);
+    let relative = state.analysis_path_of(&library, row as usize, track);
     if relative.is_empty() { return Err(AppError::new(ErrorKind::NotFound, "Track has no analysis")); }
-    let dat = rbl_anlz::resolve(&location.share_root, relative);
+    let dat = rbl_anlz::resolve(&location.share_root, &relative);
     let analysis = rbl_anlz::Anlz::read(&dat).map_err(|e| AppError::internal(e.to_string()))?;
     let bytes = analysis.with_grid_offset(offset_ms)
         .ok_or_else(|| AppError::new(ErrorKind::Malformed, "Track has no complete beat-grid header"))?;

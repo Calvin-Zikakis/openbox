@@ -94,6 +94,10 @@ pub struct GridOptions {
     allow_dynamic: bool,
     transaction: Option<String>,
     duration_ms: Option<u32>,
+    /// The track's analysis when it was registered after the index was
+    /// read; the command fills it in, the frontend never sends it.
+    #[serde(skip)]
+    registered: Option<String>,
 }
 
 /// rekordbox stores its analysis lock in bit 7 of Analysed.
@@ -297,11 +301,14 @@ struct Files {
     ext: PathBuf,
 }
 
-fn files_of(library: &Library, share: &Path, track: &str) -> AppResult<Files> {
+/// `registered` is the track's analysis when it was registered after the
+/// index was read, which the index does not show yet.
+fn files_of(library: &Library, share: &Path, track: &str, registered: Option<&str>) -> AppResult<Files> {
     let Some(row) = library.row_of(track) else {
         return Err(AppError::new(ErrorKind::NotFound, "That track is not in the library."));
     };
-    let relative = library.analysis_path.get(row as usize);
+    let indexed = library.analysis_path.get(row as usize);
+    let relative = if indexed.is_empty() { registered.unwrap_or_default() } else { indexed };
     if relative.is_empty() {
         return Err(AppError::new(ErrorKind::NotFound, "That track has not been analysed, so it has no grid to edit."));
     }
@@ -325,7 +332,14 @@ fn read_dat(dat: &Path) -> AppResult<(rbl_anlz::Anlz, Vec<Beat>)> {
 
 /// The grid as the panel sees it, without changing anything.
 pub fn state_of(editor: &GridEditor, library: &Library, share: &Path, track: &str) -> AppResult<GridStateDto> {
-    let files = files_of(library, share, track)?;
+    state_with(editor, library, share, track, None)
+}
+
+/// [`state_of`] for a track whose analysis may have been registered after
+/// the index was read.
+pub(crate) fn state_with(editor: &GridEditor, library: &Library, share: &Path, track: &str,
+    registered: Option<&str>) -> AppResult<GridStateDto> {
+    let files = files_of(library, share, track, registered)?;
     let (_, beats) = read_dat(&files.dat)?;
     Ok(editor.state_for(track, &beats))
 }
@@ -395,7 +409,7 @@ fn apply_options(editor: &GridEditor, library: &Library, location: &rbl_db::Libr
     }
     let _editing = editor.editing.lock();
     crate::file_journal::recover(&editor.journal_root, location)?;
-    let files = files_of(library, &location.share_root, track)?;
+    let files = files_of(library, &location.share_root, track, options.registered.as_deref())?;
     let (parsed, beats) = read_dat(&files.dat)?;
 
     let next: Vec<Beat> = match action {
@@ -493,11 +507,11 @@ fn set_tempo_inner(state: &AppState, track: &str, value: &str) -> AppResult<()> 
     crate::file_journal::recover(state.backup_dir(), &location)?;
     let library = state.library()?;
     let row = library.row_of(track).ok_or_else(|| AppError::new(ErrorKind::NotFound, "That track is no longer in the library."))?;
-    let relative = library.analysis_path.get(row as usize);
+    let relative = state.analysis_path_of(&library, row as usize, track);
     if relative.is_empty() {
         return state.write(|w| w.save_grid_revision(track, u32::from(bpm_x100))).map_err(write_error);
     }
-    let dat = rbl_anlz::resolve(&location.share_root, relative);
+    let dat = rbl_anlz::resolve(&location.share_root, &relative);
     let (parsed, beats) = read_dat(&dat)?;
     if rbl_anlz::grid::is_dynamic_from(&beats, None) { return Err(AppError::new(ErrorKind::Malformed, "Use the grid BPM field to confirm replacing tempo changes.")); }
     let next = apply_with_duration(&beats, None, Edit::Tempo { bpm_x100, anchor_ms: 0 }, library.length_sec[row as usize].saturating_mul(1000));
@@ -534,10 +548,11 @@ async fn run<R: tauri::Runtime>(
     track: String,
     action: GridAction,
     deck: Option<String>,
-    options: GridOptions,
+    mut options: GridOptions,
 ) -> AppResult<GridStateDto> {
     let library = state.library()?;
     let location = state.location()?;
+    options.registered = state.registered_analysis(&track);
     let state = Arc::clone(&state);
     let editor = Arc::clone(&editor);
     let outcome = {
@@ -581,9 +596,10 @@ pub async fn grid_state(
 ) -> AppResult<GridStateDto> {
     let library = state.library()?;
     let location = state.location()?;
+    let registered = state.registered_analysis(&track);
     let editor = Arc::clone(&editor);
     blocking("grid_state", move || {
-        let mut result = state_of(&editor, &library, &location.share_root, &track)?;
+        let mut result = state_with(&editor, &library, &location.share_root, &track, registered.as_deref())?;
         result.locked |= database_locked(&location, &track)?;
         Ok(result)
     }).await
@@ -644,6 +660,7 @@ pub async fn grid_lock<R: tauri::Runtime>(
 ) -> AppResult<GridStateDto> {
     let library = state.library()?;
     let location = state.location()?;
+    let registered = state.registered_analysis(&track);
     let editor = Arc::clone(&editor);
     let state = Arc::clone(&state);
     let changed = track.clone();
@@ -651,7 +668,7 @@ pub async fn grid_lock<R: tauri::Runtime>(
         let _gate = state.edit_gate.lock();
         state.write(|writer| writer.set_analysis_lock(&track, on)).map_err(write_error)?;
         editor.set_locked(&track, false)?;
-        let mut result = state_of(&editor, &library, &location.share_root, &track)?;
+        let mut result = state_with(&editor, &library, &location.share_root, &track, registered.as_deref())?;
         result.locked = database_locked(&location, &track)?;
         Ok(result)
     }).await?;
