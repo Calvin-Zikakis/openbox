@@ -9,7 +9,6 @@ Commands in these guides run from the repository root unless stated otherwise.
 | --- | --- |
 | [Getting started](development/getting-started.md) | Setting up a checkout and choosing a safe run mode. |
 | [Architecture](development/architecture.md) | Finding the owner of a feature or tracing a request. |
-| [USB sync implementation plan](development/usb-sync-redesign.md) | Planning efficient exports, recovery, live space estimates, and progress as one coordinated change. |
 | [Conventions](development/conventions.md) | Writing code that fits the project. |
 | [Testing](development/testing.md) | Choosing checks and interpreting their results. |
 | [Contributing](../CONTRIBUTING.md) | Reporting an issue or preparing a change for review. |
@@ -30,7 +29,7 @@ Commands in these guides run from the repository root unless stated otherwise.
 
 - [Library location](reference/library-location.md): which rekordbox library opens, switching it in Database management, and missing drives.
 - [USB export format](reference/usb-export-db.md): files, binary records, implementation, verification, and unknowns.
-- [USB export pipeline](reference/usb-export-pipeline.md): how an export runs from the Sync Manager to the stick, its safety checks, and where to change it.
+- [USB export pipeline](reference/usb-export-pipeline.md): how an export and selective sync run from the Sync Manager to the stick, their safety checks and recovery, what has been validated, and where to change it.
 - [Library backups](reference/backups.md): how backups are created and restored, and why.
 - [LINK behavior and hardware coverage](reference/link-testing.md): device dialects, behavior catalog, and physical checks.
 - [Analysis crate](../crates/rbl-analysis/README.md): algorithm reading path and evaluation tools.
