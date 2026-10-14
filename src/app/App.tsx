@@ -1772,6 +1772,13 @@ function AppBody() {
         `Remove ${count} from the collection? This can’t be undone. The files stay where they are.`,
       );
       if (!sure) return false;
+      // A deck holding a track being removed is ejected first, as its EJECT
+      // button would, so nothing goes on playing a track the library no
+      // longer has. What rekordbox does here is [UNKNOWN].
+      const leaving = new Set(ids);
+      const ejectLeaving = (track: RowDto | null) => (track !== null && leaving.has(track.id) ? null : track);
+      setPlayerTrack(ejectLeaving);
+      setPlayerTrackB(ejectLeaving);
       jobs.add({
         label: t("Removing {count} from the collection", { count: ids.length }),
         total: ids.length,

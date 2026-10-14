@@ -81,6 +81,38 @@ test("Cancel on the collection question removes nothing", async ({ page }) => {
   await expect(selected(page)).toHaveCount(3);
 });
 
+const deckTitle = (page: Page) =>
+  page.getByRole("region", { name: "Preview player", exact: true }).getByTestId("player-title");
+const titleCell = (page: Page, row: number) => rows(page).nth(row).locator('[data-col="title"]');
+
+/** Loads the collection's third row onto the deck and returns its title. */
+async function loadThirdRow(page: Page) {
+  await open(page);
+  await collection(page).click();
+  const title = await titleCell(page, 2).innerText();
+  await titleCell(page, 2).dblclick();
+  await expect(deckTitle(page)).toHaveText(title);
+  return title;
+}
+
+test("removing the deck's track from the collection ejects it from the deck first", async ({ page }) => {
+  await loadThirdRow(page);
+  await selectThree(page);
+  await page.keyboard.press("Delete");
+  await expect(status(page)).toContainText("Removed 3 tracks from the collection.");
+  await expect(deckTitle(page)).toHaveText("");
+});
+
+test("Cancel on the collection question leaves the deck's track loaded", async ({ page }) => {
+  const loaded = await loadThirdRow(page);
+  await selectThree(page);
+  await answerCancel(page);
+  await page.keyboard.press("Delete");
+  await expect.poll(() => asked(page)).toHaveLength(1);
+  await page.waitForTimeout(500);
+  await expect(deckTitle(page)).toHaveText(loaded);
+});
+
 test("Backspace removes every selected track from the playlist, after rekordbox's question", async ({ page }) => {
   await open(page);
   const before = await openPlaylist(page);
