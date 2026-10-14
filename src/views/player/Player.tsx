@@ -1524,7 +1524,13 @@ export const Player = memo(function Player({
   const markLoopOut = useCallback(() => {
     if (playback.idle || loopIn === null) return;
     const out = loopPoint();
-    if (out > loopIn) playback.setLoop(loopIn, out);
+    if (out > loopIn) {
+      playback.setLoop(loopIn, out);
+      // A loop set by hand is not the auto beat loop, even one that lands on
+      // the same beats as the last: the field lights from that state alone
+      // (see `beatLoop`), not from where the loop happens to be.
+      setBeatLoop(null);
+    }
     setLoopIn(null);
   }, [playback, loopIn, loopPoint]);
   const reloopOrExit = useCallback(() => {

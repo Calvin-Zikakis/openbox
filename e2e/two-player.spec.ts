@@ -211,6 +211,31 @@ test("the control row loops the chosen number of beats, and the steps resize it"
   await expect(exit).toHaveAttribute("aria-pressed", "false");
 });
 
+// The release run on 2026-10-14 failed the test above on a slow runner: its
+// manual loop's OUT snapped to the fourth beat, so the loop matched the auto
+// beat loop's range exactly and the field lit as if it were that loop.
+test("a manual loop on the same beats as the last auto beat loop leaves the field unlit", async ({ page }) => {
+  const { a } = await twoPlayer(page, "?writable=1");
+  const row = a.getByTestId("player-controls");
+  await expect(row.getByRole("button", { name: "4 beat loop" })).toBeVisible();
+
+  // AU: four beats from the head, then OUT exits it.
+  await row.getByRole("button", { name: "Loop in" }).click();
+  const exit = row.getByRole("button", { name: "Exit loop" });
+  await expect(exit).toHaveAttribute("aria-pressed", "true");
+  await row.getByRole("button", { name: "Loop out" }).click();
+  await expect(row.getByRole("button", { name: "4 beat loop" })).toHaveAttribute("aria-pressed", "false");
+
+  // MA: IN at the same head, four beats on, OUT: the same four beats.
+  await row.getByRole("button", { name: "MA", exact: true }).click();
+  await row.getByRole("button", { name: "Loop in" }).click();
+  // Deck A's, which the transport above the decks carries.
+  await page.getByRole("button", { name: "Beat jump forward" }).first().click();
+  await row.getByRole("button", { name: "Loop out" }).click();
+  await expect(a.getByTestId("player-overview").locator('[class*="loopBand"][data-active]')).toHaveCount(1);
+  await expect(exit).toHaveAttribute("aria-pressed", "false");
+});
+
 // rekordbox 7.2.11's AutoBeatLoopController labels, which ‹ and › step
 // through and stop at; the manual gives the same 1/64 to 512 (issue #241).
 const REKORDBOX_LOOP_LENGTHS = [
