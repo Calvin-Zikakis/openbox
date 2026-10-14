@@ -209,8 +209,8 @@ async function realBackend(): Promise<Backend> {
       if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
       return bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
     },
-    analyseTrack: (trackId, mode = "rbxport", settings, keyTag) =>
-      invoke<AnalysisResult>("analyse_track", { trackId, mode, settings, keyTag: keyTag ?? null }),
+    analyseTrack: (trackId, mode = "rbxport", settings, keyTag, drawing) =>
+      invoke<AnalysisResult>("analyse_track", { trackId, mode, settings, keyTag: keyTag ?? null, drawing: drawing ?? false }),
     trackBeats: async (trackId) => {
       // Raw bytes rather than a JSON array of objects: a long mix has tens of
       // thousands of beats, and `{"timeMs":123,"downbeat":true}` each is an
@@ -446,6 +446,7 @@ async function realBackend(): Promise<Backend> {
     onCuesChanged: (listener) => subscribe<string>("cues:changed", listener),
     onGridChanged: (listener) => subscribe<string>("grid:changed", listener),
     onAnalysisChanged: (listener) => subscribe<string>("analysis:changed", listener),
+    onAnalysisProgress: (listener) => subscribe<string>("analysis:progress", listener),
     reloadLibrary: () => invoke<number>("reload_library"),
     onMenu: (listener) => subscribe<string>("menu", listener),
     setMenuLabels: (labels) => invoke<void>("set_menu_labels", { labels }),

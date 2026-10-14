@@ -18,6 +18,7 @@ import {
   fail,
   isRunning,
   isWaiting,
+  prioritise,
   reset,
   start,
   succeed,
@@ -33,6 +34,11 @@ export interface Analysis {
   waiting: boolean;
   total: number;
   add: (items: readonly QueueItem[], settings?: QueueItem["analysis"]) => void;
+  /**
+   * Analyses a track a deck has just loaded, ahead of anything waiting, with
+   * its waveform drawn as the file decodes.
+   */
+  draw: (item: QueueItem) => void;
   cancel: () => void;
   clear: () => void;
 }
@@ -90,9 +96,11 @@ export function useAnalysis(
         try {
           const backend = await getBackend();
           const trackMode = track.analysis?.mode ?? mode;
-          const result = keyTag.current
-            ? await backend.analyseTrack(track.id, trackMode, track.analysis, keyTag.current)
-            : await backend.analyseTrack(track.id, trackMode, track.analysis);
+          const result = track.drawing
+            ? await backend.analyseTrack(track.id, trackMode, track.analysis, keyTag.current, true)
+            : keyTag.current
+              ? await backend.analyseTrack(track.id, trackMode, track.analysis, keyTag.current)
+              : await backend.analyseTrack(track.id, trackMode, track.analysis);
           setState((s) => succeed(s, track.id));
           onAnalysed?.(track.id, result);
         } catch (e) {
@@ -104,19 +112,27 @@ export function useAnalysis(
     }
   }, [state, onAnalysed, mode, concurrentTracks, held]);
 
+  // The preferred settings, for a track queued without the dialog.
+  const preferred = useCallback(
+    (): NonNullable<QueueItem["analysis"]> => ({ mode, bpmGrid: true, key: true, highPrecision: true, ...bpmRangeLimits(bpmRange), firstBeatCue }),
+    [mode, firstBeatCue, bpmRange],
+  );
   const add = useCallback((items: readonly QueueItem[], settings?: QueueItem["analysis"]) => {
     // Capture settings at enqueue time, including automatic imports. Later
     // preference changes must not alter tracks still waiting in this batch.
-    const chosen = settings ?? { mode, bpmGrid: true, key: true, highPrecision: true, ...bpmRangeLimits(bpmRange), firstBeatCue };
+    const chosen = settings ?? preferred();
     setState((s) => enqueue(reset(s), items.map(item => ({ ...item, analysis: { ...chosen } }))));
-  }, [mode, firstBeatCue, bpmRange]);
+  }, [preferred]);
+  const draw = useCallback((item: QueueItem) => {
+    setState((s) => prioritise(reset(s), { ...item, analysis: preferred() }));
+  }, [preferred]);
   const cancel = useCallback(() => setState(cancelQueue), []);
   const clear = useCallback(() => setState(reset), []);
 
   // Memoised as a whole: see the note in `useColumns`.
   const waiting = isWaiting(state, held);
   return useMemo(
-    () => ({ state, running, waiting, total: total(state), add, cancel, clear }),
-    [state, running, waiting, add, cancel, clear],
+    () => ({ state, running, waiting, total: total(state), add, draw, cancel, clear }),
+    [state, running, waiting, add, draw, cancel, clear],
   );
 }

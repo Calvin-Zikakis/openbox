@@ -64,6 +64,8 @@ const DEFAULT_CUE_COLOUR = theme.color.cueHot.value;
  * suite of them is not slow.
  */
 const ANALYSIS_MS = 120;
+/** Between the steps of a waveform drawn for a deck: eight of them, slow enough to watch. */
+const DRAW_STEP_MS = 150;
 
 /** Deterministic PRNG so every run, test and screenshot sees identical data. */
 function mulberry32(seed: number): () => number {
@@ -1362,6 +1364,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
   const gridStore = new Map<string, HeldGrid>();
   const gridListeners = new Set<(trackId: string) => void>();
   const analysisListeners = new Set<(trackId: string) => void>();
+  const progressListeners = new Set<(trackId: string) => void>();
+  // How far each drawing analysis has got through its track, 0 to 1.
+  const drawn = new Map<string, number>();
   const gridOf = (trackId: string): HeldGrid | null => {
     const held = gridStore.get(trackId);
     if (held) return held;
@@ -1893,7 +1898,8 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       // one-byte `PWAV` shape here drew the bands from garbage.
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
-      if (!row || row.analysed === 0) return wait(new Uint8Array());
+      const reached = drawn.get(trackId);
+      if (!row || (row.analysed === 0 && reached === undefined)) return wait(new Uint8Array());
       const rnd = mulberry32(index + 1);
       // The overview tags are 1,200 columns for any track; the detail ones
       // are far denser.
@@ -1906,7 +1912,9 @@ export function createMockBackend(options: MockOptions = {}): Backend {
           : kind === "colourDetail" ? 2
             : 3;
       const out = new Uint8Array(columns * stride);
-      for (let i = 0; i < columns; i++) {
+      // A drawing has the columns it has decoded and silence after them.
+      const heard = reached === undefined ? columns : Math.floor(reached * columns);
+      for (let i = 0; i < heard; i++) {
         const at = i / columns;
         // A shape with quiet intros and outros, so the overview reads as a
         // track rather than a block.
@@ -2662,7 +2670,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
 
     // Analysis is real work in the app; here it just answers, so the queue's
     // sequencing and progress can be driven end to end without audio.
-    analyseTrack: (trackId, _mode, settings) => {
+    analyseTrack: (trackId, _mode, settings, _keyTag, drawing) => {
       const index = Number.parseInt(trackId, 10) - 100000;
       const row = all[index];
       if (!row) return Promise.reject(new Error("That track is not in the library."));
@@ -2672,12 +2680,27 @@ export function createMockBackend(options: MockOptions = {}): Backend {
       if (index % 7 === 6) {
         return Promise.reject(new Error("That file could not be decoded."));
       }
+      // A deck watching: the waveform fills in from the left, in eighths, as
+      // the shell's does while the file decodes, then the analysis answers.
+      // Slower than a batch track, so the drawing can be seen in the browser.
+      const drawSteps = drawing && settings?.bpmGrid !== false ? 8 : 0;
+      if (drawSteps > 0) {
+        drawn.set(trackId, 0);
+        for (let step = 1; step <= drawSteps; step++) {
+          setTimeout(() => {
+            if (!drawn.has(trackId)) return;
+            drawn.set(trackId, step / drawSteps);
+            for (const listener of progressListeners) listener(trackId);
+          }, DRAW_STEP_MS * step);
+        }
+      }
       // Deliberately not instant. Real analysis is a decode and a DSP pass —
       // seconds per track — and a mock that answers immediately makes the
       // queue's progress, cancellation and failure handling unobservable.
       return new Promise((resolve) =>
         setTimeout(
           () => {
+            drawn.delete(trackId);
             if (settings?.bpmGrid !== false) {
               row.analysed = 1;
               row.bpmX100 ||= 12_800;
@@ -2704,7 +2727,7 @@ export function createMockBackend(options: MockOptions = {}): Backend {
             analysisPath: `/PIONEER/USBANLZ/P${String(index % 1000).padStart(3, "0")}/${index.toString(16).toUpperCase().padStart(8, "0")}/ANLZ0000.DAT`,
             });
           },
-          ANALYSIS_MS,
+          DRAW_STEP_MS * drawSteps + ANALYSIS_MS,
         ),
       );
     },
@@ -3055,6 +3078,10 @@ export function createMockBackend(options: MockOptions = {}): Backend {
     onAnalysisChanged: (listener) => {
       analysisListeners.add(listener);
       return () => analysisListeners.delete(listener);
+    },
+    onAnalysisProgress: (listener) => {
+      progressListeners.add(listener);
+      return () => progressListeners.delete(listener);
     },
     // The fake disk above. Copies, as with the tree: the map is the mock's.
     deviceLibraries: (path) => wait(stickLibraries.libraries(path)),

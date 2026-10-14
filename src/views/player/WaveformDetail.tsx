@@ -26,7 +26,7 @@ const inFlight = new Map<string, Promise<Uint8Array>>();
 /**
  * Bumped per track each time its bytes are dropped, so a fetch that set off
  * before then neither fills the cache nor is shared with a newer request:
- * the bytes it brings back are the ones the analysis replaced.
+ * while an analysis draws the track, its bytes change several times a second.
  */
 const editions = new Map<string, number>();
 
@@ -111,7 +111,7 @@ export interface WaveformDetailProps {
   pcmWindow?: { fromMs: number; toMs: number; drawFromMs: number; drawToMs: number } | undefined;
 }
 
-/** Drops a track's bytes: its analysis was rewritten. */
+/** Drops a track's bytes: its analysis was rewritten, or drew further. */
 function forget(trackId: string): void {
   editions.set(trackId, (editions.get(trackId) ?? 0) + 1);
   for (const cache of [bytesByTrack, inFlight]) {
@@ -146,10 +146,16 @@ export const WaveformDetail = memo(function WaveformDetail({
       : { fromMs: pcmFromMs, toMs: pcmToMs, drawFromMs: pcmDrawFromMs, drawToMs: pcmDrawToMs }
   ), [pcmFromMs, pcmToMs, pcmDrawFromMs, pcmDrawToMs]);
 
+  // What the bytes on screen are for. A new revision of the same track keeps
+  // them up until its own arrive, so a waveform being drawn grows rather
+  // than blinking out at every step.
+  const shown = useRef("");
   useEffect(() => {
     if (pcmMode) return;
     let live = true;
-    setData(null);
+    const what = `${trackId}:${detail}:${palette}`;
+    if (shown.current !== what) setData(null);
+    shown.current = what;
     void loadTag(trackId, palette, detail).then((loaded) => {
       if (live) setData(loaded);
     });
@@ -195,11 +201,15 @@ export const WaveformDetail = memo(function WaveformDetail({
     void (async () => {
       const backend = await getBackend();
       if (!live) return;
-      stop = backend.onAnalysisChanged((changed) => {
+      const refetch = (changed: string) => {
         if (changed !== trackId) return;
         forget(trackId);
         setRevision((r) => r + 1);
-      });
+      };
+      const stopChanged = backend.onAnalysisChanged(refetch);
+      // An analysis drawing the track for a deck has decoded more of it.
+      const stopProgress = backend.onAnalysisProgress(refetch);
+      stop = () => { stopChanged(); stopProgress(); };
     })();
     return () => {
       live = false;

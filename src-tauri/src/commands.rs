@@ -489,7 +489,13 @@ pub async fn track_waveform(
     };
     let share = state.share_root();
     let state = Arc::clone(&state);
-    blocking("track_waveform", move || waveform_bytes(&state, &library, &share, &track_id, &kind, from, len))
+    blocking("track_waveform", move || {
+        // A track an analysis is drawing for a deck: the waveform so far.
+        if let Some(drawing) = state.drawing(&track_id) {
+            return Ok(drawing_bytes(&drawing, &kind, from, len));
+        }
+        waveform_bytes(&state, &library, &share, &track_id, &kind, from, len)
+    })
         .await
         .map(tauri::ipc::Response::new)
 }
@@ -522,25 +528,53 @@ pub(crate) fn waveform_bytes(
     Ok(waveform_of(&rbl_anlz::resolve(share, &analysis_path), kind, from, len))
 }
 
-/// One kind of waveform from the analysis files beside `dat`, windowed.
-/// Empty when the file or the tag is not there.
-pub(crate) fn waveform_of(dat: &std::path::Path, kind: &str, from: Option<u32>, len: Option<u32>) -> Vec<u8> {
+/// Which file beside the `.DAT` holds a kind of waveform, under which tag,
+/// and how many bytes a column takes.
+fn waveform_layout(kind: &str) -> (Option<&'static str>, [u8; 4], usize) {
     // The stored path names the .DAT; the colour waveforms live in the
     // .EXT sibling and the three-band ones in .2EX.
     // rekordbox 7 draws the three-band waveforms, and every one of the
     // first 300 tracks checked in the reference library has them. `PWV6`
     // is the 1,200-column overview and `PWV7` the full-resolution detail,
     // both three bytes per column: low, mid, high.
-    let (file, tag, stride): (std::path::PathBuf, [u8; 4], usize) = match kind {
-        "bands" => (rbl_anlz::sibling(dat, "2EX"), *b"PWV6", 3),
-        "bandsDetail" => (rbl_anlz::sibling(dat, "2EX"), *b"PWV7", 3),
+    match kind {
+        "bands" => (Some("2EX"), *b"PWV6", 3),
+        "bandsDetail" => (Some("2EX"), *b"PWV7", 3),
         // The RGB palette's pair, six and two bytes a column.
-        "colourDetail" | "detail" => (rbl_anlz::sibling(dat, "EXT"), *b"PWV5", 2),
-        "colour" | "color" => (rbl_anlz::sibling(dat, "EXT"), *b"PWV4", 6),
+        "colourDetail" | "detail" => (Some("EXT"), *b"PWV5", 2),
+        "colour" | "color" => (Some("EXT"), *b"PWV4", 6),
         // The BLUE palette's pair, one byte a column.
-        "monoDetail" => (rbl_anlz::sibling(dat, "EXT"), *b"PWV3", 1),
-        _ => (dat.to_path_buf(), *b"PWAV", 1),
+        "monoDetail" => (Some("EXT"), *b"PWV3", 1),
+        _ => (None, *b"PWAV", 1),
+    }
+}
+
+/// One kind of waveform from a drawing, windowed: the bytes the finished
+/// analysis files will hold under the same tag, for what has been decoded.
+pub(crate) fn drawing_bytes(waveform: &rbl_analysis::waveform::Waveform, kind: &str, from: Option<u32>, len: Option<u32>) -> Vec<u8> {
+    let (_, tag, stride) = waveform_layout(kind);
+    let columns: Vec<rbl_anlz::BandColumn> = waveform
+        .columns
+        .iter()
+        .map(|c| rbl_anlz::BandColumn { low: c.low, mid: c.mid, high: c.high, peak: c.peak })
+        .collect();
+    let whole = match &tag {
+        // As `author_with_overview` writes the measured overview.
+        b"PWV6" => waveform.overview.iter().flatten().map(|v| (*v).min(127)).collect(),
+        b"PWV7" => rbl_anlz::encode::pwv7(&columns),
+        b"PWV5" => rbl_anlz::encode::pwv5(&columns),
+        b"PWV4" => rbl_anlz::encode::pwv4(&columns),
+        b"PWV3" => rbl_anlz::encode::pwv3(&columns),
+        _ => rbl_anlz::encode::pwav(&columns),
     };
+    window_of(&whole, stride, from, len)
+}
+
+/// One kind of waveform from the analysis files beside `dat`, windowed.
+/// Empty when the file or the tag is not there.
+pub(crate) fn waveform_of(dat: &std::path::Path, kind: &str, from: Option<u32>, len: Option<u32>) -> Vec<u8> {
+    let (sibling, tag, stride) = waveform_layout(kind);
+    let file = sibling.map_or_else(|| dat.to_path_buf(), |ext| rbl_anlz::sibling(dat, ext));
 
     let Ok(anlz) = rbl_anlz::Anlz::read(&file) else {
         // Analysis missing on disk: draw nothing rather than fail the view.

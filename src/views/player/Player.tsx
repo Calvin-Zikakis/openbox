@@ -263,6 +263,11 @@ export interface PlayerProps {
    * drawn and disabled, with the same reason the menus give.
    */
   readOnly?: boolean;
+  /**
+   * The track was not analysed when it was loaded and is being analysed for
+   * this deck now: its waveform is drawn as the analysis decodes it.
+   */
+  drawing?: boolean;
 }
 
 /**
@@ -845,8 +850,11 @@ export const Player = memo(function Player({
   bars: linkedBars, onBars, jumpSize: linkedJump, onJumpSize,
   publishSync, peerSync, isMaster = false, onMaster, synced = false, onSyncToggle,
   leaderBpmX100 = null, onPlayingBpm, onKeyShift, onGridNudge, publishGridFollow, readOnly = false,
+  drawing = false,
 }: PlayerProps) {
   const playback = usePlayback(track?.id ?? null, deck, false);
+  // A waveform to draw: the analysis's, or one an analysis is drawing now.
+  const hasWaveform = track !== null && (track.analysed > 0 || drawing);
   // The waveforms follow their containers, which change with the window and
   // with the tree splitter — a fixed-width canvas stretched by CSS is blurry
   // on a wide window and wasted resolution on a narrow one.
@@ -2182,6 +2190,7 @@ export const Player = memo(function Player({
         onScrubEnd={endDrag}
         onEject={onEject}
         onLoadSelected={onLoadSelected}
+        drawn={hasWaveform}
       />
     );
   }
@@ -2374,7 +2383,7 @@ export const Player = memo(function Player({
               aria-valuemax={Math.round(total)}
               aria-valuenow={Math.round(playback.positionRef.current)}
             >
-              {track && track.analysed ? (
+              {track && hasWaveform ? (
                 <WaveformDetail
                   trackId={track.id}
                   progress={0.5}
@@ -2549,7 +2558,7 @@ export const Player = memo(function Player({
             onPointerCancel={endDrag}
           >
             <div ref={scroller} className={styles.scroller}>
-              {track && track.analysed ? (
+              {track && hasWaveform ? (
                 <WaveformDetail
                   // PCM and PWV7 have incompatible binary layouts. This is
                   // the detail waveform the wheel zooms, so make its format

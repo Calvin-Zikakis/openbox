@@ -101,3 +101,20 @@ it("asks for the key to be written into the file only with Write the value to th
   await act(async () => { analysis.add([{ id: "on", title: "On" }]); await Promise.resolve(); });
   expect(held.analyseTrack).toHaveBeenLastCalledWith("on", "rbxport", expect.anything(), "classic");
 });
+
+it("analyses a deck's track next, ahead of a batch, and asks for it to be drawn", async () => {
+  const finish = new Map<string, (result: AnalysisResult) => void>();
+  held.analyseTrack.mockImplementation((id: string) => new Promise<AnalysisResult>(resolve => { finish.set(id, resolve); }));
+  await act(async () => { root.render(<Harness preferences={{ mode: "rbxport", concurrentTracks: 1, auto: false, firstBeatCue: false, bpmRange: "70-180", writeKeyTag: false }} />); await Promise.resolve(); });
+  await act(async () => { analysis.add([{ id: "a", title: "First" }, { id: "b", title: "Waiting" }]); await Promise.resolve(); });
+  await act(async () => { analysis.draw({ id: "deck", title: "Loaded" }); await Promise.resolve(); });
+  expect(analysis.state.pending.map(item => item.id)).toEqual(["deck", "b"]);
+  await act(async () => {
+    finish.get("a")!({ trackId: "a", bpmX100: 12800, key: "Am", beats: 1, peak: 1, durationSec: 60, elapsedMs: 1, analysisPath: "" });
+    await Promise.resolve();
+  });
+  const defaults = { mode: "rbxport", bpmGrid: true, key: true, highPrecision: true, minBpm: 70, maxBpm: 180, firstBeatCue: false };
+  expect(held.analyseTrack.mock.calls.at(-1)).toEqual(["deck", "rbxport", defaults, undefined, true]);
+  // The batch's own tracks are not drawn.
+  expect(held.analyseTrack.mock.calls[0]).toEqual(["a", "rbxport", defaults]);
+});

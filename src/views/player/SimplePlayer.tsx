@@ -64,13 +64,15 @@ export interface SimplePlayerProps {
   onScrubEnd: (event: React.PointerEvent<HTMLDivElement>) => void;
   onEject?: (() => void) | undefined;
   onLoadSelected?: (() => void) | undefined;
+  /** Whether the track has a waveform to draw, finished or being drawn. */
+  drawn: boolean;
 }
 
 export const SimplePlayer = memo(function SimplePlayer({
   track, deck, shell, armed, droppable, onDragOver, onDrop,
   playing, idle, onToggle, positionSource, total, bpmX100, baseBpmX100, onBpmChange, cues, grid, cuePoint,
   overviewRef, overview, overviewHead, scrubFill, onScrubStart, onScrubMove, onScrubEnd,
-  onEject, onLoadSelected,
+  onEject, onLoadSelected, drawn,
 }: SimplePlayerProps) {
 
   const tip = useTooltip();
@@ -163,7 +165,7 @@ export const SimplePlayer = memo(function SimplePlayer({
             aria-valuemax={Math.round(total)}
             aria-valuenow={Math.round(positionSource.positionRef.current)}
           >
-            {track && track.analysed ? (
+            {track && drawn ? (
               <WaveformDetail
                 trackId={track.id}
                 progress={0.5}

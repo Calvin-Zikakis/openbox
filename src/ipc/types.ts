@@ -293,6 +293,12 @@ export interface Backend {
    * its waveform. Returns its own unsubscribe.
    */
   onAnalysisChanged(listener: (trackId: string) => void): () => void;
+  /**
+   * An analysis asked to draw (`analyseTrack`'s `drawing`) has decoded more
+   * of the track: `trackWaveform` now serves the waveform so far, laid out
+   * over the whole track. Returns its own unsubscribe.
+   */
+  onAnalysisProgress(listener: (trackId: string) => void): () => void;
 
   /**
    * Fires when the backend has finished loading the library.
@@ -371,8 +377,12 @@ export interface Backend {
    * `keyTag` is "Write the value to the ID3 tag": the notation a key this
    * pass finds is written into the track's file in, or absent to leave the
    * file alone.
+   *
+   * `drawing` is for a track loaded on a deck: its waveform is served as it
+   * decodes, and `onAnalysisProgress` says when there is more of it. That
+   * costs a second waveform pass, so a batch leaves it off.
    */
-  analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport", settings?: AnalysisSettings, keyTag?: KeyDisplay): Promise<AnalysisResult>;
+  analyseTrack(trackId: string, mode?: "rekordbox" | "rbxport", settings?: AnalysisSettings, keyTag?: KeyDisplay, drawing?: boolean): Promise<AnalysisResult>;
 
   /**
    * A track's whole beat grid, as raw bytes: seven per beat, a little-endian

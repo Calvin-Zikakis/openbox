@@ -50,6 +50,9 @@ pub struct AppState {
     /// run is over, not per track, so until then this is how a deck finds the
     /// waveform, grid and phrases of a track analysed while it was loaded.
     fresh_analysis: parking_lot::Mutex<HashMap<String, String>>,
+    /// The waveform of each track an analysis is still drawing, by id: what
+    /// it has decoded so far, laid out over the whole track.
+    drawing: parking_lot::Mutex<HashMap<String, Arc<rbl_analysis::waveform::Waveform>>>,
 }
 
 /// One reversible library operation. Grid edits keep their own history because
@@ -182,6 +185,7 @@ impl AppState {
             missing_scan: parking_lot::Mutex::new(None),
             device_assets: RwLock::new(HashMap::new()),
             fresh_analysis: parking_lot::Mutex::new(HashMap::new()),
+            drawing: parking_lot::Mutex::new(HashMap::new()),
         }
     }
 
@@ -387,6 +391,20 @@ impl AppState {
     /// Notes that `track`'s row now names the analysis at `relative`.
     pub(crate) fn note_analysis(&self, track: &str, relative: &str) {
         self.fresh_analysis.lock().insert(track.to_owned(), relative.to_owned());
+    }
+
+    /// The waveform an analysis is drawing for `track`, while it is.
+    pub(crate) fn drawing(&self, track: &str) -> Option<Arc<rbl_analysis::waveform::Waveform>> {
+        self.drawing.lock().get(track).cloned()
+    }
+
+    /// Replaces what `track`'s drawing shows, or ends it with `None`.
+    pub(crate) fn set_drawing(&self, track: &str, waveform: Option<Arc<rbl_analysis::waveform::Waveform>>) {
+        let mut drawing = self.drawing.lock();
+        match waveform {
+            Some(waveform) => { drawing.insert(track.to_owned(), waveform); }
+            None => { drawing.remove(track); }
+        }
     }
 
     /// Why the library is not loaded, when a load has failed.

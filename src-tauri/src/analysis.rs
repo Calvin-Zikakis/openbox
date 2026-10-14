@@ -37,6 +37,21 @@ const DECODE_CAP_SECS: f64 = 1800.0;
 /// moved further is a new place and gets its own cue.
 const FIRST_BEAT_CUE_TOLERANCE_MS: u32 = 5;
 
+/// How often a deck watching a track being analysed is shown the waveform
+/// so far. A five-minute file decodes in about a fifth of a second in a
+/// release build, so this is a handful of steps from left to right.
+const DRAWING_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Where an analysis shows its waveform as the file decodes, for a deck that
+/// has the track loaded.
+pub(crate) struct Drawing<'a> {
+    /// Called with each snapshot: the waveform so far, over the whole track.
+    pub publish: &'a dyn Fn(rbl_analysis::waveform::Waveform),
+    /// The track's length as the library has it, for a file whose container
+    /// does not say how long it is.
+    pub length_secs: Option<f64>,
+}
+
 /// Per-batch choices from the Analysis Setting dialog. Missing settings
 /// preserve the defaults used by imports and older callers.
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
@@ -112,6 +127,10 @@ pub struct AnalysisResultDto {
 /// Refused, with the reason, while rekordbox holds the library; nothing is
 /// written to the share tree either in that case, since the files are only
 /// reachable through the row.
+///
+/// With `drawing`, the waveform is also shown as the file decodes: each
+/// snapshot replaces the track's drawing, which `track_waveform` serves, and
+/// `analysis:progress` names the track so a deck showing it fetches again.
 #[tauri::command]
 #[allow(clippy::too_many_arguments, reason = "Tauri injects the application states alongside command arguments")]
 pub async fn analyse_track<R: tauri::Runtime>(
@@ -122,6 +141,7 @@ pub async fn analyse_track<R: tauri::Runtime>(
     mode: Option<String>,
     settings: Option<AnalysisSettings>,
     key_tag: Option<crate::key_tag::KeyNotation>,
+    drawing: Option<bool>,
 ) -> AppResult<AnalysisResultDto> {
     let preset = match mode.as_deref().unwrap_or("rbxport") {
         "rekordbox" => rbl_analysis::AnalysisPreset::Rekordbox,
@@ -133,8 +153,28 @@ pub async fn analyse_track<R: tauri::Runtime>(
     let state = Arc::clone(&state);
     let editor = Arc::clone(&editor);
     let settings = settings.unwrap_or_default();
-    let result = blocking("analyse_track", move || {
-        let result = analyse_and_save(&state, &library, &share, &track_id, preset, &settings, &editor)?;
+    let drawing = drawing.unwrap_or(false);
+    let drawn = track_id.clone();
+    let progress = {
+        let state = Arc::clone(&state);
+        let app = app.clone();
+        let track = track_id.clone();
+        move |waveform: rbl_analysis::waveform::Waveform| {
+            state.set_drawing(&track, Some(Arc::new(waveform)));
+            // The track's id, well inside the 1 KB event cap; the waveform
+            // itself is fetched, as the finished one is.
+            let _ = tauri::Emitter::emit(&app, "analysis:progress", &track);
+        }
+    };
+    let worker = Arc::clone(&state);
+    let finished = blocking("analyse_track", move || {
+        let state = worker;
+        let length_secs = library.row_of(&track_id)
+            .and_then(|row| library.length_sec.get(row as usize).copied())
+            .filter(|&secs| secs > 0)
+            .map(f64::from);
+        let hook = Drawing { publish: &progress, length_secs };
+        let result = analyse_and_save(&state, &library, &share, &track_id, preset, &settings, &editor, drawing.then_some(&hook))?;
         // After the library has the key, as rekordbox writes the tag after
         // `modTrackKeyInfo` stores it. Only with the preference on, which is
         // what `key_tag` being sent says.
@@ -143,7 +183,13 @@ pub async fn analyse_track<R: tauri::Runtime>(
             crate::key_tag::write_logged(&track_id, path, key.name_for(notation));
         }
         Ok(result)
-    }).await?;
+    }).await;
+    // Finished or failed, the drawing is over: from here a deck reads the
+    // track's own files, or nothing.
+    if drawing {
+        state.set_drawing(&drawn, None);
+    }
+    let result = finished?;
     // The track's id, well inside the 1 KB event cap: a deck showing the
     // track redraws its waveform and grid from the new files.
     let _ = tauri::Emitter::emit(&app, "analysis:changed", &result.track_id);
@@ -155,6 +201,7 @@ pub async fn analyse_track<R: tauri::Runtime>(
 
 /// The whole job, apart from the event: what the command runs on a worker
 /// thread, and what the tests run directly.
+#[allow(clippy::too_many_arguments, reason = "the command's inputs, passed through to one worker")]
 fn analyse_and_save(
     state: &AppState,
     library: &rbl_index::Library,
@@ -163,6 +210,7 @@ fn analyse_and_save(
     preset: rbl_analysis::AnalysisPreset,
     settings: &AnalysisSettings,
     editor: &crate::grid::GridEditor,
+    drawing: Option<&Drawing<'_>>,
 ) -> AppResult<AnalysisResultDto> {
     let options = settings.options(preset)?;
     // By the id map rather than a scan: a queue analyses hundreds of
@@ -190,7 +238,7 @@ fn analyse_and_save(
         let audio = rbl_audio::decode_mono(std::path::Path::new(path), Some(DECODE_CAP_SECS)).map_err(|e| decode_error(&e))?;
         return analyse_key_only(state, library, row, track_id, &audio, editor, started);
     }
-    let (analysis, duration_secs) = analyse_file(std::path::Path::new(path), &options, DECODE_CAP_SECS)?;
+    let (analysis, duration_secs) = analyse_file(std::path::Path::new(path), &options, DECODE_CAP_SECS, drawing)?;
 
     let _edit_guard = state.edit_gate.lock();
     ensure_analysis_unlocked(state, editor, track_id)?;
@@ -287,31 +335,63 @@ fn decode_error(e: &rbl_audio::AudioError) -> AppError {
 /// for all 2,447.9 s and its last beat at 2,447.5 s]. Before this the
 /// waveform and grid stopped at the half hour (#156).
 ///
+/// With `drawing`, every sample also goes through a waveform builder from
+/// the start, and a snapshot of it is published as the file decodes, laid
+/// out over the length the container declares (or the library's, when it
+/// does not): the waveform fills in from the left. That is a second
+/// waveform pass, about a fifth of the analysis, so only a deck that is
+/// watching asks for it.
+///
 /// Resolves to the analysis and the file's length in seconds.
 fn analyse_file(
     path: &std::path::Path,
     options: &rbl_analysis::AnalysisOptions,
     head_secs: f64,
+    drawing: Option<&Drawing<'_>>,
 ) -> AppResult<(rbl_analysis::Analysis, f64)> {
     let mut stream = rbl_audio::MonoStream::open(path).map_err(|e| decode_error(&e))?;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a positive number of seconds at an audio rate")]
     let cap = (head_secs.max(0.0) * f64::from(stream.sample_rate())) as usize;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a positive number of seconds at an audio rate")]
+    let expected = stream.expected_frames().and_then(|frames| usize::try_from(frames).ok())
+        .or_else(|| drawing?.length_secs.map(|secs| (secs * f64::from(stream.sample_rate())) as usize))
+        .unwrap_or(0);
     let mut head: Vec<f32> = Vec::with_capacity(cap.min(1 << 24));
-    // Past the head, the whole file's waveform, which begins with the head.
-    let mut rest: Option<rbl_analysis::waveform::Builder> = None;
+    // The whole file's waveform, which begins with the head: built past the
+    // head, or from the first sample for a drawing.
+    let mut builder: Option<rbl_analysis::waveform::Builder> = None;
+    // How much of the head the builder has been given.
+    let mut fed = 0;
+    let mut past_head = false;
+    let mut shown = std::time::Instant::now();
     while let Some(chunk) = stream.next_chunk() {
-        if let Some(builder) = rest.as_mut() {
-            builder.push(chunk);
-            continue;
+        if past_head {
+            if let Some(builder) = builder.as_mut() {
+                builder.push(chunk);
+            }
+        } else {
+            head.extend_from_slice(chunk);
+            if drawing.is_some() || head.len() > cap {
+                let builder = builder.get_or_insert_with(|| rbl_analysis::waveform::Builder::new(stream.sample_rate()));
+                builder.push(&head[fed..]);
+                fed = head.len();
+            }
+            if head.len() > cap {
+                head.truncate(cap);
+                head.shrink_to_fit();
+                past_head = true;
+            }
         }
-        head.extend_from_slice(chunk);
-        if head.len() > cap {
-            let mut builder = rbl_analysis::waveform::Builder::new(stream.sample_rate());
-            builder.push(&head);
-            head.truncate(cap);
-            head.shrink_to_fit();
-            rest = Some(builder);
+        if let (Some(drawing), Some(builder)) = (drawing, builder.as_ref()) {
+            if shown.elapsed() >= DRAWING_INTERVAL {
+                (drawing.publish)(builder.snapshot(expected));
+                shown = std::time::Instant::now();
+            }
         }
+    }
+    // All of it, while the tempo, key and phrases are worked out.
+    if let (Some(drawing), Some(builder)) = (drawing, builder.as_ref()) {
+        (drawing.publish)(builder.snapshot(builder.samples()));
     }
     if head.is_empty() {
         return Err(decode_error(&rbl_audio::AudioError::Unsupported("decoded no samples".into())));
@@ -319,7 +399,7 @@ fn analyse_file(
     let rate = stream.sample_rate();
     let audio = rbl_audio::Audio { samples: head, sample_rate: rate, source_channels: stream.source_channels() };
     let mut analysis = rbl_analysis::analyse_with(&audio.samples, rate, *options);
-    let Some(builder) = rest else {
+    let Some(builder) = builder.filter(|_| past_head) else {
         return Ok((analysis, audio.duration_secs()));
     };
     #[allow(clippy::cast_precision_loss, reason = "a sample count well inside f64's exact range")]
@@ -627,7 +707,7 @@ mod tests {
         assert!(read(&library).is_empty(), "unanalysed, the deck has nothing to draw");
 
         let result = analyse_and_save(&state, &library, &share, &track, rbl_analysis::AnalysisPreset::Rbxport,
-            &AnalysisSettings::default(), &editor).expect("analysed");
+            &AnalysisSettings::default(), &editor, None).expect("analysed");
         let dat = rbl_anlz::resolve(&share, &result.analysis_path);
         let written = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "2EX")).unwrap().waveform(b"PWV7").unwrap().1.to_vec();
         assert_eq!(library.analysis_path.get(library.row_of(&track).unwrap() as usize), "", "the index has not been re-read");
@@ -640,6 +720,36 @@ mod tests {
         state.set_library(reloaded, false, None, 0, location);
         assert_eq!(state.registered_analysis(&track), None, "the reloaded index has it, so the note is dropped");
         assert_eq!(read(&state.library().unwrap()), written);
+    }
+
+    /// A deck that loads an unanalysed track watches its waveform fill in:
+    /// every snapshot spans the whole track, and the last is what the files
+    /// then hold.
+    #[test]
+    fn a_watched_analysis_draws_the_whole_track_as_it_decodes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location) = unanalysed_click_track(dir.path());
+        let share = location.share_root.clone();
+        let library = state.library().unwrap();
+        let editor = crate::grid::GridEditor::at(&dir.path().join("editor"));
+        let track = rbl_db::fixture::track_id(0);
+
+        let snapshots = std::sync::Mutex::new(Vec::new());
+        let publish = |waveform: rbl_analysis::waveform::Waveform| snapshots.lock().unwrap().push(waveform);
+        let drawing = Drawing { publish: &publish, length_secs: Some(20.0) };
+        let result = analyse_and_save(&state, &library, &share, &track, rbl_analysis::AnalysisPreset::Rbxport,
+            &AnalysisSettings::default(), &editor, Some(&drawing)).expect("analysed");
+
+        let snapshots = snapshots.into_inner().unwrap();
+        assert!(!snapshots.is_empty(), "the deck is shown the waveform before the analysis is over");
+        // Twenty seconds at 150 columns a second, from the first snapshot on.
+        assert!(snapshots.iter().all(|w| w.columns.len() == 3_000), "each snapshot spans the whole track");
+        let last = snapshots.last().unwrap();
+        let dat = rbl_anlz::resolve(&share, &result.analysis_path);
+        let two = rbl_anlz::Anlz::read(&rbl_anlz::sibling(&dat, "2EX")).unwrap();
+        assert_eq!(crate::commands::drawing_bytes(last, "bandsDetail", None, None), two.waveform(b"PWV7").unwrap().1,
+            "the last snapshot's detail is what the files hold");
+        assert_eq!(crate::commands::drawing_bytes(last, "bands", None, None).len(), 3_600, "and a whole overview");
     }
 
     #[test]
@@ -669,7 +779,7 @@ mod tests {
 
         let editor = crate::grid::GridEditor::at(&dir.path().join("editor"));
         let settings = AnalysisSettings::default();
-        let result = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).expect("analysed");
+        let result = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor, None).expect("analysed");
         assert_eq!(result.track_id, track_id(0));
         assert_eq!(result.analysed, 105);
         assert_eq!(
@@ -717,7 +827,7 @@ mod tests {
         assert_eq!(link, 0x002c_0600, "rekordbox needs the track registration to display its preview");
 
         // A second analysis lands in the same place, files rewritten in place.
-        let again = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).expect("analysed again");
+        let again = analyse_and_save(&state, &library, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor, None).expect("analysed again");
         assert_eq!(again.analysis_path, result.analysis_path);
         let names: Vec<String> = std::fs::read_dir(dat_path.parent().unwrap())
             .unwrap()
@@ -735,7 +845,7 @@ mod tests {
         ).unwrap();
         let before = metadata();
         let key_only = AnalysisSettings { bpm_grid: false, ..settings };
-        let result = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_only, &editor).unwrap();
+        let result = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_only, &editor, None).unwrap();
         assert_eq!(metadata(), before);
         assert_eq!(result.bpm_x100, again.bpm_x100);
         for (path, bytes) in &saved_files { assert_eq!(std::fs::read(path).unwrap(), *bytes); }
@@ -743,7 +853,7 @@ mod tests {
         // Unchecking KEY must leave its database reference untouched.
         let key_before: Option<String> = db.connection().query_row("SELECT KeyID FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| r.get(0)).unwrap();
         let grid_only = AnalysisSettings { key: false, ..settings };
-        analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &grid_only, &editor).unwrap();
+        analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &grid_only, &editor, None).unwrap();
         let key_after: Option<String> = db.connection().query_row("SELECT KeyID FROM djmdContent WHERE ID = ?1", [track_id(0)], |r| r.get(0)).unwrap();
         assert_eq!(key_after, key_before);
 
@@ -755,11 +865,11 @@ mod tests {
         // second pass finds it there and adds nothing.
         let first_beat = rbl_anlz::Anlz::read(&dat_path).unwrap().beat_grid().unwrap()[0].time_ms;
         let with_cue = AnalysisSettings { first_beat_cue: true, ..settings };
-        let result = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &with_cue, &editor).unwrap();
+        let result = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &with_cue, &editor, None).unwrap();
         assert!(result.added_first_beat_cue);
         let memory: Vec<u32> = cues(&fresh).iter().filter(|cue| cue.is_memory()).map(|cue| cue.position_ms).collect();
         assert_eq!(memory, [first_beat], "the index follows without a reload");
-        let again = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &with_cue, &editor).unwrap();
+        let again = analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &with_cue, &editor, None).unwrap();
         assert!(!again.added_first_beat_cue);
         let stored: i64 = db.connection().query_row(
             "SELECT COUNT(*) FROM djmdCue WHERE ContentID = ?1 AND Kind = 0 AND rb_local_deleted = 0", [track_id(0)], |r| r.get(0),
@@ -767,7 +877,7 @@ mod tests {
         assert_eq!(stored, 1);
         // Key-only has no grid to place it on.
         let key_with_cue = AnalysisSettings { bpm_grid: false, first_beat_cue: true, ..settings };
-        assert!(!analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_with_cue, &editor).unwrap().added_first_beat_cue);
+        assert!(!analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_with_cue, &editor, None).unwrap().added_first_beat_cue);
 
         // A refused cue write says the analysis was saved and only the cue
         // is missing, keeps the cause for the log, and adds nothing.
@@ -787,8 +897,8 @@ mod tests {
 
         // Locks refuse both kinds of analysis before any files are rewritten.
         editor.set_locked(&track_id(0), true).unwrap();
-        assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor).is_err());
-        assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_only, &editor).is_err());
+        assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &settings, &editor, None).is_err());
+        assert!(analyse_and_save(&state, &fresh, &share, &track_id(0), rbl_analysis::AnalysisPreset::Rbxport, &key_only, &editor, None).is_err());
     }
 
     /// #156: a file longer than what is held for the tempo still gets a
@@ -801,8 +911,8 @@ mod tests {
         write_click_wav(&audio, 24, 0.5);
         let options = AnalysisSettings::default().options(rbl_analysis::AnalysisPreset::Rbxport).unwrap();
 
-        let (whole, whole_secs) = analyse_file(&audio, &options, 60.0).unwrap();
-        let (headed, headed_secs) = analyse_file(&audio, &options, 8.0).unwrap();
+        let (whole, whole_secs) = analyse_file(&audio, &options, 60.0, None).unwrap();
+        let (headed, headed_secs) = analyse_file(&audio, &options, 8.0, None).unwrap();
         assert!((whole_secs - 24.0).abs() < 0.01 && (headed_secs - 24.0).abs() < 0.01, "{whole_secs} {headed_secs}");
 
         // Every 1/150 s column of all 24 seconds, identical to the whole decode's.

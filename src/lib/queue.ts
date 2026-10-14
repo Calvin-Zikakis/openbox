@@ -26,6 +26,8 @@ export interface QueueItem {
   id: string;
   title: string;
   analysis?: AnalysisSettings & { mode: AnalysisMode };
+  /** Loaded on a deck: its waveform is drawn as the file decodes. */
+  drawing?: boolean;
 }
 
 export interface QueueState {
@@ -81,6 +83,22 @@ export function enqueue(state: QueueState, items: readonly QueueItem[]): QueueSt
   });
   if (fresh.length === 0) return state;
   return { ...state, pending: [...state.pending, ...fresh], cancelling: false };
+}
+
+/**
+ * Puts a track at the head of the queue to be drawn as it is analysed: the
+ * one a deck has just loaded. A track already waiting moves up and keeps the
+ * settings it was queued with; one already being analysed is left to finish.
+ */
+export function prioritise(state: QueueState, item: QueueItem): QueueState {
+  if (state.running.some((i) => i.id === item.id)) return state;
+  const waiting = state.pending.find((i) => i.id === item.id);
+  const first = { ...(waiting ?? item), drawing: true };
+  return {
+    ...state,
+    pending: [first, ...state.pending.filter((i) => i.id !== item.id)],
+    cancelling: false,
+  };
 }
 
 /**

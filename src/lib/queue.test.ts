@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  cancel, emptyQueue, enqueue, fail, isRunning, isWaiting, reset, SLOTS, start, succeed, total,
+  cancel, emptyQueue, enqueue, fail, isRunning, isWaiting, prioritise, reset, SLOTS, start, succeed, total,
   type QueueItem,
 } from "./queue";
 
@@ -43,6 +43,37 @@ describe("enqueue", () => {
   it("clears a previous cancellation, since this is a new request", () => {
     const q = enqueue(cancel(enqueue(emptyQueue, items("a"))), items("b"));
     expect(q.cancelling).toBe(false);
+  });
+});
+
+describe("prioritise", () => {
+  const loaded: QueueItem = { id: "d", title: "Track d" };
+
+  it("puts a deck's track ahead of a batch, to be drawn", () => {
+    const q = prioritise(enqueue(emptyQueue, items("a", "b")), loaded);
+    expect(q.pending.map((i) => [i.id, i.drawing ?? false])).toEqual([["d", true], ["a", false], ["b", false]]);
+  });
+
+  it("moves a waiting track up and keeps the settings it was queued with", () => {
+    const queued = enqueue(emptyQueue, [
+      { id: "a", title: "A" },
+      { id: "d", title: "D", analysis: { mode: "rekordbox", bpmGrid: true, key: false, highPrecision: true, minBpm: 70, maxBpm: 180, firstBeatCue: false } },
+    ]);
+    const q = prioritise(queued, loaded);
+    expect(q.pending.map((i) => i.id)).toEqual(["d", "a"]);
+    expect(q.pending[0]).toMatchObject({ drawing: true, analysis: { mode: "rekordbox", key: false } });
+  });
+
+  it("leaves a track already being analysed to finish", () => {
+    const q = start(enqueue(emptyQueue, items("d", "a")), 1);
+    expect(prioritise(q, loaded)).toBe(q);
+  });
+
+  it("starts next, before the batch, when a slot frees", () => {
+    let q = start(enqueue(emptyQueue, items("a", "b", "c")), 1);
+    q = prioritise(q, loaded);
+    q = start(succeed(q, "a"), 1);
+    expect(running(q)).toEqual(["d"]);
   });
 });
 

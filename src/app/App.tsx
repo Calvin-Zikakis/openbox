@@ -603,8 +603,8 @@ function AppBody() {
       };
       setPendingEdits((edits) => new Map(edits).set(id, found));
       // A deck holds the row it was loaded with: one holding this track
-      // takes the answer too, so it draws the new waveform and shows the
-      // tempo and key.
+      // takes the answer too, so it keeps the waveform it was drawing and
+      // gains the tempo and key.
       const update = (row: RowDto | null) => (row?.id === id ? { ...row, ...found } : row);
       setPlayerTrack(update);
       setPlayerTrackB(update);
@@ -1280,11 +1280,27 @@ function AppBody() {
     const edits = row ? pendingEdits.get(row.id) : undefined;
     const current = row && edits ? { ...row, ...edits } : row;
     set(current);
+    // A track loaded without analysis is analysed now, ahead of anything
+    // waiting, and its waveform drawn on the deck from left to right as the
+    // file decodes. [UNKNOWN] whether rekordbox analyses a track on load;
+    // this is the behaviour the maintainer asked for. Only the library's own
+    // tracks (numeric ids): a stick's or a folder's file has no row for the
+    // analysis to be written to, and nothing is written to a read-only or
+    // protected library.
+    if (current && !(current.analysed > 0) && !readOnly && /^\d+$/.test(current.id)) {
+      analysis.draw({ id: current.id, title: current.title });
+    }
   });
   const deckLoaders = useMemo(() => ({
     a: (row: RowDto | null) => loadOnto(setPlayerTrack, row),
     b: (row: RowDto | null) => loadOnto(setPlayerTrackB, row),
   }), [loadOnto]);
+  // The tracks an analysis is drawing for a deck, so the deck shows the
+  // waveform before the analysis is over.
+  const drawingIds = useMemo(
+    () => new Set([...analysis.state.running, ...analysis.state.pending].filter((item) => item.drawing).map((item) => item.id)),
+    [analysis.state],
+  );
 
   /**
    * Loading a dragged track into a deck.
@@ -2967,6 +2983,7 @@ function AppBody() {
           {deckCount(layout) > 1 ? <MixerStrip /> : null}
           <Player
             track={playerTrack}
+            drawing={playerTrack !== null && drawingIds.has(playerTrack.id)}
             onEject={ejectA}
             onError={setPlayerError}
             onAnalyse={analyseOne}
@@ -3002,6 +3019,7 @@ function AppBody() {
             <Player
               deck="b"
               track={playerTrackB}
+              drawing={playerTrackB !== null && drawingIds.has(playerTrackB.id)}
               onEject={ejectB}
               onAnalyse={analyseOne}
               onExportTrack={exportDeckTrack}

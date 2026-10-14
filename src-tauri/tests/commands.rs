@@ -1491,6 +1491,7 @@ fn analysis_writes_the_detected_key_into_the_file_in_the_display_notation() {
             None,
             Some(key_only),
             notation.map(|n| serde_json::from_str(&format!("\"{n}\"")).unwrap()),
+            None,
         ))
         .expect("the chord analyses")
     };
@@ -1536,6 +1537,7 @@ fn an_imported_file_analyses_into_a_waveform_and_a_grid() {
         s.state(),
         s.app.state::<Arc<rbxport_lib::grid::GridEditor>>(),
         id.clone(),
+        None,
         None,
         None,
         None,

@@ -217,20 +217,25 @@ fn overview(samples: &[f32], rate: u32) -> Vec<[u8; 3]> {
             energy = 0.0;
         }
     }
-    finish_overview(raw, &counts, level, frames)
+    finish_overview(raw, &counts, level, frames, COLOUR_PREVIEW_COLUMNS)
 }
 
 /// The overview's normalization, once the samples are summed into buckets:
 /// shared by the in-memory pass and the [`Builder`].
-fn finish_overview(mut raw: Vec<[f64; 3]>, counts: &[usize], level: f64, frames: usize) -> Vec<[u8; 3]> {
+///
+/// Only the first `reached` buckets hold audio yet: the bands are levelled
+/// on those, and the rest stay silent. A finished waveform has reached them
+/// all.
+fn finish_overview(mut raw: Vec<[f64; 3]>, counts: &[usize], level: f64, frames: usize, reached: usize) -> Vec<[u8; 3]> {
     let target = level / frames.max(1) as f64 * 92.0;
+    let reached = reached.clamp(1, COLOUR_PREVIEW_COLUMNS);
     let mut means = [0.0; 3];
     for (values, &count) in raw.iter_mut().zip(counts) {
         let n = count.max(1) as f64;
         values[0] = (values[0] / n).powf(0.45);
         values[1] /= n;
         values[2] /= n;
-        for band in 0..3 { means[band] += values[band] / COLOUR_PREVIEW_COLUMNS as f64; }
+        for band in 0..3 { means[band] += values[band] / reached as f64; }
     }
     // A two-bucket trailing average matches the reference envelope's release
     // and half-bucket alignment without blurring section boundaries widely.
@@ -240,8 +245,8 @@ fn finish_overview(mut raw: Vec<[f64; 3]>, counts: &[usize], level: f64, frames:
         for band in 0..3 { values[band] = f64::midpoint(current[band], previous[band]); }
         previous = current;
     }
-    raw.into_iter().map(|values| std::array::from_fn(|band| {
-        if means[band] < 1e-6 { 0 } else {
+    raw.into_iter().enumerate().map(|(bucket, values)| std::array::from_fn(|band| {
+        if means[band] < 1e-6 || bucket >= reached { 0 } else {
             (values[band] * target / means[band]).round().clamp(0.0, 127.0) as u8
         }
     })).collect()
@@ -390,9 +395,38 @@ impl Builder {
         if last > 0 {
             self.close_column();
         }
+        let overview = self.overview_over(self.samples, last);
+        Waveform { columns: self.columns, columns_per_sec: COLUMNS_PER_SEC, overview }
+    }
+
+    /// The waveform so far, laid out over `total_samples`: the columns
+    /// decoded up to now, then silence to where the track is expected to end,
+    /// so a drawing of it fills in from the left at the scale the finished
+    /// one will have. The column still being filled is left out, and the
+    /// overview is levelled on what has been heard so far, so it is a
+    /// preview of [`Self::finish`] rather than a prefix of it. Past the end
+    /// that `total_samples` names, the layout follows what was pushed.
+    #[must_use]
+    pub fn snapshot(&self, total_samples: usize) -> Waveform {
+        let heard = self.columns.len() * self.per_column;
+        let total = total_samples.max(heard);
+        if heard == 0 {
+            return Waveform {
+                columns: vec![WaveformColumn::default(); total.div_ceil(self.per_column)],
+                columns_per_sec: COLUMNS_PER_SEC,
+                overview: vec![[0; 3]; COLOUR_PREVIEW_COLUMNS],
+            };
+        }
+        let mut columns = self.columns.clone();
+        columns.resize(total.div_ceil(self.per_column), WaveformColumn::default());
+        Waveform { columns, columns_per_sec: COLUMNS_PER_SEC, overview: self.overview_over(total, 0) }
+    }
+
+    /// The 1,200-bucket overview of the closed columns over `total` samples,
+    /// the last column holding `last` samples when it is a short one.
+    fn overview_over(&self, total: usize, last: usize) -> Vec<[u8; 3]> {
         let mut raw = vec![[0.0_f64; 3]; COLOUR_PREVIEW_COLUMNS];
         let mut counts = vec![0_usize; COLOUR_PREVIEW_COLUMNS];
-        let total = self.samples;
         for (index, sums) in self.hops.iter().enumerate() {
             let first = index * self.per_column;
             let count = if index + 1 == self.hops.len() && last > 0 { last } else { self.per_column };
@@ -402,9 +436,10 @@ impl Builder {
             for band in 0..3 { raw[bucket][band] += sums[band]; }
             counts[bucket] += count;
         }
-        let frames = self.hops.len();
-        let overview = finish_overview(raw, &counts, self.level, frames);
-        Waveform { columns: self.columns, columns_per_sec: COLUMNS_PER_SEC, overview }
+        // The bucket the last column landed in, and every one before it.
+        let reached = counts.iter().rposition(|&count| count > 0).map_or(0, |bucket| bucket + 1);
+        let reached = if total == self.samples { COLOUR_PREVIEW_COLUMNS } else { reached };
+        finish_overview(raw, &counts, self.level, self.hops.len(), reached)
     }
 }
 
@@ -470,6 +505,36 @@ mod pack_tests {
             .map(|(&a, &b)| usize::from(a.abs_diff(b))).sum();
         assert!(off <= 3 * COLOUR_PREVIEW_COLUMNS / 50, "the overview stays within rounding of compute's: {off}");
         assert_eq!(Builder::new(rate as u32).finish().columns, []);
+    }
+
+    #[test]
+    fn a_snapshot_draws_the_heard_part_at_the_finished_scale() {
+        let rate = 44_100;
+        let samples: Vec<f32> = (0..rate * 20).map(|i| {
+            let t = i as f32 / rate as f32;
+            0.4 * (2.0 * std::f32::consts::PI * 90.0 * t).sin() + 0.1 * (2.0 * std::f32::consts::PI * 5000.0 * t).sin()
+        }).collect();
+        let mut builder = Builder::new(rate as u32);
+        let empty = builder.snapshot(samples.len());
+        assert_eq!(empty.columns.len(), 20 * 150, "nothing heard is a silent track of the whole length");
+        assert!(empty.overview.iter().flatten().all(|&v| v == 0));
+
+        let (heard, rest) = samples.split_at(samples.len() / 4);
+        for piece in heard.chunks(1_152) { builder.push(piece); }
+        let quarter = builder.snapshot(samples.len());
+        for piece in rest.chunks(1_152) { builder.push(piece); }
+        let finished = builder.finish();
+
+        assert_eq!(quarter.columns.len(), finished.columns.len(), "laid out over the whole track");
+        let closed = heard.len() / (rate as usize / 150);
+        assert_eq!(quarter.columns[..closed], finished.columns[..closed], "the heard columns are the finished ones");
+        assert!(quarter.columns[closed..].iter().all(|c| *c == WaveformColumn::default()), "the rest is still blank");
+        // A steady tone levels the same on a quarter as on the whole, so the
+        // heard quarter of the overview is not scaled up to fill the strip.
+        let off: usize = quarter.overview[10..290].iter().flatten().zip(finished.overview[10..290].iter().flatten())
+            .map(|(&a, &b)| usize::from(a.abs_diff(b))).sum();
+        assert!(off <= 3 * 280 / 10, "the heard quarter is drawn at the finished level: {off}");
+        assert!(quarter.overview[310..].iter().flatten().all(|&v| v == 0), "and nothing past it");
     }
 
     #[test]
