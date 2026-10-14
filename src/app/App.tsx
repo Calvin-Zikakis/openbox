@@ -1797,8 +1797,9 @@ function AppBody() {
   );
 
   // A missing track's menu [OBS rekordbox 7.2.14, issue #201]. Auto
-  // Relocate searches Preferences' Auto Relocate Search Folders for each
-  // selected track's file name; Relocate asks for each selected track's file
+  // Relocate searches the stored Auto Relocate Search Folders (not shown in
+  // Preferences; Music, Movies and Desktop by default) for each selected
+  // track's file name; Relocate asks for each selected track's file
   // in turn, as rekordbox's `relocateSelectedFiles` does (src/lib/relocate.ts).
   const relocateSearch = useMemo((): RelocateSearch => ({
     folders: advancedPrefs.relocateUserFolders ? [...advancedPrefs.relocateFolders] : [],

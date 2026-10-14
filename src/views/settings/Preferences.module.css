@@ -456,38 +456,6 @@
 .facts dt { color: var(--c-device-label); }
 .facts dd { margin: 0; font-variant-numeric: tabular-nums; }
 
-/* A bounded list: a library can lose thousands when a drive is unplugged. */
-.list {
-  margin: 8px 0 0 calc(var(--s-pref-control-inset) - var(--s-pref-section-pad-x));
-  padding: 0;
-  list-style: none;
-  max-height: 180px;
-  overflow-y: auto;
-  font-size: var(--f-size-pref-small);
-}
-.list li {
-  display: flex;
-  flex-direction: column;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--c-raised);
-}
-.list li:last-child { border-bottom: 0; }
-.listTitle { color: var(--c-icon-on); }
-.listPath { color: var(--c-text-dim); word-break: break-all; }
-.listAction {
-  align-self: flex-start;
-  margin-top: 4px;
-  padding: 2px 8px;
-  border: 1px solid var(--c-raised);
-  border-radius: 2px;
-  background: var(--c-button);
-  color: var(--c-icon-on);
-  font: inherit;
-  font-size: var(--f-size-pref-small);
-  cursor: default;
-}
-.listAction:hover { border-color: var(--c-accent); }
-
 /* ---- Keyboard ---- */
 .keys {
   margin: calc(var(--s-pref-key-list-top) - var(--s-pref-section-pad-top)) calc(var(--s-pref-key-list-inset) - var(--s-pref-section-pad-x)) 0;

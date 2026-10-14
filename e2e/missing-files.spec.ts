@@ -84,14 +84,6 @@ test("Auto Relocate shows Searching... and analysis asked for meanwhile waits fo
   await expect(status.getByRole("button", { name: "Stop" })).toHaveCount(0, { timeout: 15_000 });
 });
 
-/** Opens Preferences › Advanced › Database's Auto Relocate Search Folders. */
-async function searchFolders(page: Page) {
-  await page.getByRole("banner").getByRole("button", { name: "Settings" }).click();
-  const preferences = page.getByRole("dialog", { name: "Preferences" });
-  await preferences.getByRole("tab", { name: "Advanced" }).click();
-  return preferences.getByRole("region", { name: "Auto Relocate Search Folders" });
-}
-
 /** File › Display All Missing Files. */
 async function openManager(page: Page) {
   await page.waitForFunction(() => "__menu" in window);
@@ -101,33 +93,16 @@ async function openManager(page: Page) {
   return manager;
 }
 
-test("Auto Relocate Search Folders has rekordbox's boxes, Music, Movies and Desktop ticked", async ({ page }) => {
+test("Auto Relocate searches Music, Movies and Desktop by default", async ({ page }) => {
   await open(page);
-  const folders = await searchFolders(page);
-  // [OBS rekordbox 7.2.19 static, DetailAutoRelocate] Music, Movies,
-  // Desktop, then Specified user folders; only the last starts unticked and
-  // greys the list, Add and Del.
-  const boxes = folders.getByRole("checkbox");
-  await expect(boxes).toHaveCount(4);
-  await expect(folders.getByRole("checkbox", { name: "Music" })).toBeChecked();
-  await expect(folders.getByRole("checkbox", { name: "Movies" })).toBeChecked();
-  await expect(folders.getByRole("checkbox", { name: "Desktop" })).toBeChecked();
-  const own = folders.getByRole("checkbox", { name: "Specified user folders" });
-  await expect(own).not.toBeChecked();
-  await expect(folders.getByRole("button", { name: "Add" })).toBeDisabled();
-  await expect(folders.getByRole("combobox", { name: "Search folders" })).toBeDisabled();
-  await own.check();
-  await folders.getByRole("button", { name: "Add" }).click();
-  await expect(folders.getByRole("combobox", { name: "Search folders" })).toHaveValue("/Users/mock/Music/Moved");
-  await folders.getByRole("checkbox", { name: "Desktop" }).uncheck();
-  await page.keyboard.press("Escape");
-
-  // Auto Relocate searches what is ticked, the user's folders first.
+  // [OBS rekordbox 7.2.19 static, DetailAutoRelocate] Music, Movies and
+  // Desktop start ticked and Specified user folders does not. Preferences
+  // does not show these boxes, so the defaults are what is searched.
   const manager = await openManager(page);
   await manager.getByRole("button", { name: "Auto Relocate" }).click();
   await expect(manager).toContainText("143 Track");
   const searched = await page.evaluate(() => (window as unknown as { __relocateSearch: unknown[] }).__relocateSearch);
-  expect(searched).toEqual([{ folders: ["/Users/mock/Music/Moved"], music: true, video: true, desktop: false }]);
+  expect(searched).toEqual([{ folders: [], music: true, video: true, desktop: true }]);
 });
 
 test("Relocate over several tracks asks for the first file, then finds the rest from its location", async ({ page }) => {
@@ -195,17 +170,9 @@ test("a missing track does not load:the deck keeps its track and the status bar 
 });
 
 test("the Missing File Manager lists every missing track and relocates them", async ({ page }) => {
-  // Preferences, then the manager, then three rescans: longer than one view.
+  // The manager, then three rescans: longer than one view.
   test.setTimeout(60_000);
   await open(page);
-  // A search folder first, from Preferences, where rekordbox keeps them.
-  const folders = await searchFolders(page);
-  await folders.getByRole("checkbox", { name: "Specified user folders" }).check();
-  await folders.getByRole("button", { name: "Add" }).click();
-  await expect(folders.getByRole("combobox", { name: "Search folders" })).toHaveValue("/Users/mock/Music/Moved");
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "Preferences" })).toHaveCount(0);
-
   const manager = await openManager(page);
 
   // 2000 mock tracks, every seventh from the second: 286.
@@ -217,12 +184,12 @@ test("the Missing File Manager lists every missing track and relocates them", as
   await expect(first).toBeVisible();
   await expect(grid.getByRole("row", { selected: false })).toHaveCount(1); // the header
 
-  // The mock's search folder holds every other missing file.
+  // The mock's default search folders hold every other missing file.
   await manager.getByRole("button", { name: "Auto Relocate" }).click();
   await expect(manager).toContainText("143 Track");
   await expect(manager).toContainText("143 relocated, 143 not found in the search folders.");
   expect(await page.evaluate(() => (window as unknown as { __relocateSearch: unknown[] }).__relocateSearch))
-    .toEqual([{ folders: ["/Users/mock/Music/Moved"], music: true, video: true, desktop: true }]);
+    .toEqual([{ folders: [], music: true, video: true, desktop: true }]);
 
   // One row, then Delete: rekordbox's question, then only that one goes.
   await grid.getByRole("row").nth(1).click();

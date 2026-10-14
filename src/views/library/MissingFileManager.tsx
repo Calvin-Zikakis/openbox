@@ -38,7 +38,7 @@ const now = <T,>(work: () => Promise<T>): Promise<T> => work();
 export function MissingFileManager({ readOnly, search, searching = now, onWrote, onFailed, onClose }: {
   /** rekordbox holds the library, or Library Protection is on: nothing is written. */
   readOnly: boolean;
-  /** Preferences › Advanced › Database › Auto Relocate Search Folders. */
+  /** The stored Auto Relocate Search Folders. */
   search: RelocateSearch;
   /**
    * Runs Auto Relocate's search as the app's "Searching..." job, so the

@@ -1714,7 +1714,7 @@ export interface XmlImportReport {
 export type ConfirmReplace = (names: readonly string[]) => Promise<boolean>;
 
 /**
- * Preferences › Advanced › Database › Auto Relocate Search Folders: the
+ * The stored Auto Relocate Search Folders (not shown in Preferences): the
  * user's folders (empty unless Specified user folders is ticked), then the
  * Music, Movies/Videos and Desktop folders where ticked.
  */

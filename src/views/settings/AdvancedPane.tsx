@@ -2,15 +2,14 @@
  * Advanced: Database, Browse and Others. Captures docs/screenshots 9.49.32
  * to 9.49.51 PM.
  *
- * Database holds the library's own facts, rekordbox's Database management
- * (the one place rekordbox chooses which library it works on), and
- * rekordbox's Auto Relocate Search Folders, which the Missing File Manager
- * (File › Display All Missing Files) and a missing track's Auto Relocate
- * search. Browse holds
+ * Database holds the library's own facts and rekordbox's Database management
+ * (the one place rekordbox chooses which library it works on). Browse holds
  * Library Protection and Edit Library. Others holds BEAT/BPM SYNC, the
  * quantize beat value and play history.
  *
- * Not here: iTunes and rekordbox xml (neither is read), Auto Export and
+ * Not here: Auto Relocate Search Folders and Duplicates (hidden; Auto
+ * Relocate searches the stored folders, Music, Movies and Desktop by
+ * default), iTunes and rekordbox xml (neither is read), Auto Export and
  * Database management's Move Database (neither is built), My Tag, colour names, display
  * speed, the long-press menu and the Tag List (none exist here), the
  * export name (link export is not built), hot cue GATE, loop export,
@@ -19,12 +18,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { getBackend } from "@/ipc/client";
-import type { DatabaseDrive, Duplicates, LibrarySummary } from "@/ipc/types";
+import type { DatabaseDrive, LibrarySummary } from "@/ipc/types";
 import { useTranslation } from "@/i18n";
-import { QUANTIZE_BEATS, type AdvancedPreferences } from "@/lib/preferences";
+import { QUANTIZE_BEATS } from "@/lib/preferences";
 import { usePreferencesContext } from "@/store/usePreferences";
 import styles from "./Preferences.module.css";
-import { Button, Checkbox, Note, Radios, Section, Select, Sub, Toggle } from "./controls";
+import { Button, Note, Radios, Section, Select, Sub, Toggle } from "./controls";
 
 export type AdvancedTab = "database" | "browse" | "others";
 
@@ -217,8 +216,6 @@ export function AdvancedPane({ tab, summary }: {
           </dd>
         </dl>
       </Section>
-      <RelocateSection advanced={advanced} set={set} />
-      <DuplicatesSection readOnly={(summary?.readOnly ?? false) || advanced.protectLibrary} />
       {/* Last, as in rekordbox, under the external-drive settings. */}
       <DatabaseManagementSection readOnly={summary?.readOnly ?? false} />
     </>
@@ -289,179 +286,6 @@ function DatabaseManagementSection({ readOnly }: { readOnly: boolean }) {
         onChange={(masterDb) => { void choose(masterDb); }}
       />
       {failed ? <Note failed>{failed}</Note> : null}
-    </Section>
-  );
-}
-
-/** How many duplicate groups to list. The counts above are exact. */
-const DUPLICATE_GROUPS_SHOWN = 20;
-
-/** `m:ss`, for telling two copies apart by length. */
-function minutes(seconds: number): string {
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-/**
- * Duplicates: tracks that share a title and an artist. Nothing is changed
- * by looking; a copy is removed from the collection one at a time, after
- * asking, and the file stays where it is.
- */
-function DuplicatesSection({ readOnly }: { readOnly: boolean }) {
-  const [found, setFound] = useState<Duplicates | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-
-  const scan = async () => {
-    const backend = await getBackend();
-    setFound(await backend.findDuplicates(DUPLICATE_GROUPS_SHOWN));
-  };
-
-  return (
-    <Section title="Duplicates">
-      {found === null ? (
-        <>
-          <div className={styles.actions}>
-            <Button
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                void scan().finally(() => setBusy(false));
-              }}
-            >
-              {busy ? "Looking…" : "Find duplicates"}
-            </Button>
-          </div>
-        </>
-      ) : found.groups === 0 ? (
-        <Note>No two tracks share a title and an artist.</Note>
-      ) : (
-        <>
-          <Note>
-            {found.groups.toLocaleString()} title{found.groups === 1 ? "" : "s"} with more than one copy,{" "}
-            {found.extra.toLocaleString()} extra cop{found.extra === 1 ? "y" : "ies"} in all.
-          </Note>
-          <ul className={styles.list} aria-label="Duplicates">
-            {found.shown.map((group) => (
-              <li key={`${group.title}\u0000${group.artist}`}>
-                <span className={styles.listTitle}>
-                  {group.title}
-                  {group.artist ? ` — ${group.artist}` : ""}
-                </span>
-                {group.tracks.map((track) => (
-                  <span key={track.id} className={styles.listPath}>
-                    {minutes(track.durationSec)} · {track.path}
-                    {track.present ? "" : " (file missing)"}
-                    <button
-                      type="button"
-                      className={styles.listAction}
-                      disabled={readOnly || busy}
-                      onClick={() => {
-                        setBusy(true);
-                        void (async () => {
-                          try {
-                            const backend = await getBackend();
-                            const sure = await backend.confirm(
-                              `Remove this copy of ${group.title} from the collection? This can’t be undone. The file stays where it is.`,
-                            );
-                            if (!sure) return;
-                            await backend.edits.removeFromCollection([track.id]);
-                            setNote(`Removed a copy of ${group.title}.`);
-                            await scan();
-                          } catch (e) {
-                            setNote(e instanceof Error ? e.message : "That copy could not be removed.");
-                          } finally {
-                            setBusy(false);
-                          }
-                        })();
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </span>
-                ))}
-              </li>
-            ))}
-          </ul>
-          {found.groups > found.shown.length ? <Note>Showing the first {found.shown.length}.</Note> : null}
-          {note ? <Note>{note}</Note> : null}
-        </>
-      )}
-    </Section>
-  );
-}
-
-/**
- * rekordbox's Auto Relocate Search Folders [OBS rekordbox 7.2.19 static,
- * `DetailAutoRelocate::DetailAutoRelocate` @0x1006b4894]: the Music,
- * Movies and Desktop boxes stacked under the heading, then Specified user
- * folders, then the folder list with Add and Del, which are greyed until that
- * box is ticked. Music, Movies and Desktop start ticked; Specified user
- * folders does not (`SettingIF::isSelectedAutoRelocate*Folder`). Auto
- * Relocate searches the ticked ones in that order, the user's folders first.
- *
- * The second box is "Movies": the constructor names it "Video", and
- * `lookAndFeelChanged` @0x1006b5584 renames it "Movies" with no platform
- * check, and rekordbox's shared .lang files carry "Music", "Movies" and
- * "Desktop" together. [ASSUME] Windows shows "Movies" too (not yet seen on a
- * Windows rekordbox).
- */
-function RelocateSection({ advanced, set }: {
-  advanced: AdvancedPreferences;
-  set: (patch: Partial<AdvancedPreferences>) => void;
-}) {
-  const t = useTranslation();
-  const folders = advanced.relocateFolders;
-  const own = advanced.relocateUserFolders;
-  const [picked, setPicked] = useState<string>(folders[0] ?? "");
-  const current = folders.includes(picked) ? picked : (folders[0] ?? "");
-
-  return (
-    <Section title="Auto Relocate Search Folders">
-      <Checkbox label="Music" checked={advanced.relocateMusic} onChange={(relocateMusic) => set({ relocateMusic })} />
-      <Checkbox label="Movies" checked={advanced.relocateVideo} onChange={(relocateVideo) => set({ relocateVideo })} />
-      <Checkbox label="Desktop" checked={advanced.relocateDesktop} onChange={(relocateDesktop) => set({ relocateDesktop })} />
-      <Checkbox
-        label="Specified user folders"
-        checked={own}
-        onChange={(relocateUserFolders) => set({ relocateUserFolders })}
-      />
-      <div className={styles.actions}>
-        <select
-          className={styles.select}
-          data-plain
-          aria-label="Search folders"
-          value={current}
-          disabled={!own}
-          onChange={(e) => setPicked(e.target.value)}
-        >
-          {folders.length === 0 ? <option value="">(no choices)</option> : null}
-          {folders.map((folder) => (
-            <option key={folder} value={folder}>{folder}</option>
-          ))}
-        </select>
-        <Button
-          disabled={!own}
-          onClick={() => {
-            void (async () => {
-              const backend = await getBackend();
-              // [OBS static] rekordbox's Add (`DetailAutoRelocate::buttonClicked`
-              // @0x1006b5a4c) browses for a folder under this title.
-              const folder = await backend.pickFolder(t("Choose a new fullpath for"));
-              if (folder === null || folders.includes(folder)) return;
-              set({ relocateFolders: [...folders, folder] });
-              setPicked(folder);
-            })();
-          }}
-        >
-          Add
-        </Button>
-        <Button
-          disabled={!own || current === ""}
-          onClick={() => set({ relocateFolders: folders.filter((f) => f !== current) })}
-        >
-          Del
-        </Button>
-      </div>
     </Section>
   );
 }
