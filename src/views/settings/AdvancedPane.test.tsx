@@ -96,19 +96,22 @@ it("turns protection on without checking backups", async () => {
 
 it("offers the four same-name folder choices, Import as a copy first and chosen by default (#355)", () => {
   mount();
-  const group = host.querySelector('[role="radiogroup"][aria-label="When a dropped folder has the same name as a list"]');
-  if (!group) throw new Error("same-name folder choices missing");
-  const radios = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
-  expect(radios.map((radio) => radio.value)).toEqual(["copy", "replace", "keep", "ask"]);
-  expect([...group.querySelectorAll("label")].map((label) => label.textContent))
+  const select = host.querySelector<HTMLSelectElement>('select[aria-label="When a dropped folder has the same name as a list"]');
+  if (!select) throw new Error("same-name folder choices missing");
+  const options = [...select.options];
+  expect(options.map((option) => option.value)).toEqual(["copy", "replace", "keep", "ask"]);
+  expect(options.map((option) => option.textContent))
     .toEqual(["Import as a copy", "Replace existing", "Keep existing", "Ask me"]);
-  expect(radios.find((radio) => radio.checked)?.value).toBe("copy");
+  expect(select.value).toBe("copy");
   expect(host.textContent).toContain(
     "Replace existing deletes the list with that name, and every list inside it if it is a folder, without asking. " +
       "This cannot be undone.",
   );
 
-  act(() => radios.at(3)?.click());
+  act(() => {
+    select.value = "ask";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   expect(update).toHaveBeenCalledWith("advanced", { folderDropClash: "ask" });
 });
 

@@ -89,7 +89,7 @@ export function AdvancedPane({ tab, summary }: {
         </Section>
         <Section title="Playlists">
           <Sub>When a track is already in the playlist</Sub>
-          <Radios
+          <Select
             label="When a track is already in the playlist"
             value={advanced.duplicateTracks}
             choices={[
@@ -101,7 +101,7 @@ export function AdvancedPane({ tab, summary }: {
           />
           <Sub>{t("When importing a playlist from a device")}</Sub>
           <Note>{t("Tracks the collection does not have are copied to PioneerDJ/Imported from Device in your Music folder. Files already there are never replaced.")}</Note>
-          <Radios
+          <Select
             label={t("When importing a playlist from a device")}
             value={advanced.deviceImportMissing}
             choices={[
@@ -113,7 +113,7 @@ export function AdvancedPane({ tab, summary }: {
             onChange={(deviceImportMissing) => set({ deviceImportMissing })}
           />
           <Sub>{t("When a dropped folder has the same name as a list")}</Sub>
-          <Radios
+          <Select
             label={t("When a dropped folder has the same name as a list")}
             value={advanced.folderDropClash}
             choices={[
