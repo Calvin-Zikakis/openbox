@@ -77,6 +77,7 @@ beforeEach(() => {
     trackPcmWaveform: fetchPcm,
     trackWaveform: () => pwv7.promise,
     onAnalysisChanged: () => () => {},
+    onAnalysisProgress: () => () => {},
   } as unknown as Backend);
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
   clearRect: vi.fn(),
@@ -210,6 +211,7 @@ describe("overview without the palette's tag (#372)", () => {
         return Promise.resolve(tags[kind] ?? new Uint8Array());
       },
       onAnalysisChanged: () => () => {},
+      onAnalysisProgress: () => () => {},
     } as unknown as Backend);
     return asked;
   }
@@ -241,5 +243,52 @@ describe("overview without the palette's tag (#372)", () => {
     await settle();
     expect(asked).toEqual(["bandsDetail"]);
     expect(drawn.wave).not.toHaveBeenCalled();
+  });
+});
+
+describe("a waveform being drawn by an analysis", () => {
+  it("fetches again at each step and keeps the part already drawn until the next arrives", async () => {
+    let step: (trackId: string) => void = () => {};
+    const fetches: Deferred<Uint8Array>[] = [];
+    __setBackend({
+      trackWaveform: () => {
+        const next = deferred<Uint8Array>();
+        fetches.push(next);
+        return next.promise;
+      },
+      onAnalysisChanged: () => () => {},
+      onAnalysisProgress: (listener: (trackId: string) => void) => {
+        step = listener;
+        return () => {};
+      },
+    } as unknown as Backend);
+    act(() => root.render(<WaveformDetail trackId="drawing-track" progress={0.5} span={1} width={400} height={40} />));
+    await settle();
+    const quarter = new Uint8Array(1_200 * 3).fill(30, 0, 300 * 3);
+    fetches[0]?.resolve(quarter);
+    await settle();
+    expect(drawn.wave).toHaveBeenLastCalledWith(
+      expect.anything(), quarter, expect.any(Number), expect.any(Number), "3band", false, false, expect.anything(),
+    );
+
+    // Another track's progress is not this deck's.
+    act(() => step("another-track"));
+    await settle();
+    expect(fetches).toHaveLength(1);
+
+    drawn.wave.mockClear();
+    act(() => step("drawing-track"));
+    await settle();
+    expect(fetches).toHaveLength(2);
+    // Redrawn meanwhile only from the quarter it had, never blank.
+    expect(drawn.wave.mock.calls.length).toBeGreaterThan(0);
+    for (const call of drawn.wave.mock.calls) expect(call[1]).toEqual(quarter);
+
+    const half = new Uint8Array(1_200 * 3).fill(30, 0, 600 * 3);
+    fetches[1]?.resolve(half);
+    await settle();
+    expect(drawn.wave).toHaveBeenLastCalledWith(
+      expect.anything(), half, expect.any(Number), expect.any(Number), "3band", false, false, expect.anything(),
+    );
   });
 });
