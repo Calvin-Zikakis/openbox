@@ -151,6 +151,9 @@ test("the search shortcut puts the caret in the box from anywhere", async ({ pag
 
 test("a search that matches nothing empties the list without breaking it", async ({ page }) => {
   await page.goto("/");
+  // The list is remounted once the session is restored; text typed into the
+  // box before that went to the one being replaced, and the search was lost.
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   const search = page.getByRole("searchbox", { name: /search within/i });
   await search.fill("zzzzzzzzzz-no-such-track");
 
@@ -1271,6 +1274,8 @@ test("a comment is edited in place, and Escape abandons the edit", async ({ page
 
 test("a comment commits on Enter", async ({ page }) => {
   await page.goto("/?writable=1");
+  // Past the remount once the session is restored, which would close the field.
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   const cell = page.locator('[role="gridcell"][data-col="comment"]').nth(3);
   await cell.dblclick();
   const field = page.getByRole("textbox", { name: "Comment" });
@@ -1491,6 +1496,8 @@ test("a rating appears at once rather than waiting for the reload", async ({ pag
 
 test("an edited comment shows before the backend catches up", async ({ page }) => {
   await page.goto("/?writable=1");
+  // Past the remount once the session is restored, which would close the field.
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   const cell = page.locator('[role="gridcell"][data-col="comment"]').nth(3);
   await cell.dblclick();
   const field = page.getByRole("textbox", { name: "Comment" });

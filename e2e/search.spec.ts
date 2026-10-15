@@ -3,6 +3,8 @@ import { TRACK_SEARCH_OPTIONS } from "../src/lib/search";
 
 test("track search offers the reference scopes and searches the selected field", async ({ page }) => {
   await page.goto("/");
+  // Past the remount once the session is restored, which would drop the text.
+  await expect(page.getByTestId("browser-title")).toContainText("Tracks)");
   await page.getByRole("treeitem", { name: "All Tracks", exact: true }).click();
   const input = page.getByRole("searchbox", { name: "Search within this track list", exact: true }).first();
   await input.fill("ARTBAT");
