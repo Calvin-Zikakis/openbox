@@ -1196,6 +1196,9 @@ test("only playlists offer themselves as a drop target", async ({ page }) => {
   );
   expect(outlined).toBe(0);
   await page.mouse.up();
+  // The drag is over before the test is, so the context never closes on one
+  // still ending: that took WebKit's browser down after the LINK strip's.
+  await expect(playlists).toHaveCount(0);
 });
 
 test("only the playlist under a dragged track lights up, and it goes dark when the drag leaves", async ({
@@ -1226,6 +1229,8 @@ test("only the playlist under a dragged track lights up, and it goes dark when t
   await page.mouse.move(600, 600, { steps: 6 });
   await expect(page.locator('[role="treeitem"][data-over]')).toHaveCount(0);
   await page.mouse.up();
+  // The drag is over before the test is, as above.
+  await expect(page.locator('[role="treeitem"][data-droppable]')).toHaveCount(0);
 });
 
 test("a track can be rated by clicking its stars", async ({ page }) => {
