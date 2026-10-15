@@ -716,7 +716,14 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
    */
   const scrubTo = useCallback(
     (seconds: number) => {
-      if (idle || !isReady() || !Number.isFinite(seconds)) return;
+      if (idle || !Number.isFinite(seconds)) return;
+      // A click on the overview while the track is still opening is where it
+      // should start: a seek, kept until the load is ready as a cue's is.
+      // Dropped, the head stayed at the top and PLAY started it from there.
+      if (!isReady()) {
+        seek(seconds);
+        return;
+      }
       const at = Math.max(seconds, -5);
       // Pinned, not merely moved: a drag on a playing deck must not carry on
       // running forward between pointer moves, which is what made a steady
@@ -746,7 +753,7 @@ export function usePlayback(trackId: string | null, DECK: DeckId = DEFAULT_DECK,
         })();
       });
     },
-    [idle, emit, isReady, DECK, setPosition],
+    [idle, emit, isReady, seek, DECK, setPosition],
   );
 
   /** Lets go. The playhead stays where the drag left it. */

@@ -131,6 +131,25 @@ it("defers cue and play until the newest rapidly selected track is ready", async
   expect(sent).toEqual(["seek:12000", "play"]);
 });
 
+it("keeps an overview click made while the track opens, and starts from there", async () => {
+  // The continuous-play e2e clicks the overview's end and presses PLAY right
+  // after loading; a click before the load was ready used to be dropped, so
+  // the deck played from the top and never reached the end.
+  act(() => {
+    deck.scrubBegin();
+    deck.scrubTo(290);
+    deck.scrubEnd();
+    deck.toggle();
+  });
+  await settle();
+  expect(sent).toEqual([]);
+  expect(deck.positionRef.current).toBe(290);
+
+  finish(loads[0]!);
+  await settle();
+  expect(sent).toEqual(["seek:290000", "play"]);
+});
+
 it("lets a cue release cancel play that was queued during loading", async () => {
   act(() => deck.toggle());
   expect(deck.playing).toBe(true);
