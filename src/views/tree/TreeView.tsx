@@ -148,6 +148,40 @@ const Row = memo(function Row({
   useEffect(() => {
     if (!droppable && !fileDroppable) setOver(false);
   }, [droppable, fileDroppable]);
+  const takeDrag = (e: React.DragEvent<HTMLDivElement>) => {
+    // A node being moved takes precedence: the same row is both a place to
+    // put tracks and a place in the tree, and only one of those is in hand.
+    if (onMoveOver) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const box = e.currentTarget.getBoundingClientRect();
+      const third = box.height / 3;
+      // A folder's middle swallows the node; its edges place it alongside.
+      const edge =
+        node.kind === "folder" && e.clientY > box.top + third && e.clientY < box.bottom - third
+          ? "into"
+          : e.clientY > box.top + box.height / 2
+            ? "below"
+            : "above";
+      onMoveOver(node, edge);
+      return;
+    }
+    // A file drag from outside the app: `dataTransfer.files` is empty
+    // until the drop, but `types` carries "Files" throughout, which is
+    // the browser's own signal that this is worth taking.
+    if (!droppable && fileDroppable && e.dataTransfer.types.includes("Files")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      setOver(true);
+      return;
+    }
+    // Only a playlist takes tracks: a folder holds playlists, and dropping
+    // into one would have to invent which.
+    if (!droppable) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setOver(true);
+  };
   return (
     <div
       className={styles.node}
@@ -173,40 +207,11 @@ const Row = memo(function Row({
         onMoveStart?.(node);
       }}
       onDragEnd={() => onMoveEnd?.()}
-      onDragOver={(e) => {
-        // A node being moved takes precedence: the same row is both a place to
-        // put tracks and a place in the tree, and only one of those is in hand.
-        if (onMoveOver) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          const box = e.currentTarget.getBoundingClientRect();
-          const third = box.height / 3;
-          // A folder's middle swallows the node; its edges place it alongside.
-          const edge =
-            node.kind === "folder" && e.clientY > box.top + third && e.clientY < box.bottom - third
-              ? "into"
-              : e.clientY > box.top + box.height / 2
-                ? "below"
-                : "above";
-          onMoveOver(node, edge);
-          return;
-        }
-        // A file drag from outside the app: `dataTransfer.files` is empty
-        // until the drop, but `types` carries "Files" throughout, which is
-        // the browser's own signal that this is worth taking.
-        if (!droppable && fileDroppable && e.dataTransfer.types.includes("Files")) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
-          setOver(true);
-          return;
-        }
-        // Only a playlist takes tracks: a folder holds playlists, and dropping
-        // into one would have to invent which.
-        if (!droppable) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "copy";
-        setOver(true);
-      }}
+      // Taken on entering as well as over: a drop let go just after the
+      // pointer reached a row can be decided by its `dragenter` alone, as
+      // the track list's rows found (see `takeReorder` in TrackTable).
+      onDragEnter={takeDrag}
+      onDragOver={takeDrag}
       onDragLeave={(e) => {
         // Leaving for one of the row's own children is not leaving the row.
         if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
