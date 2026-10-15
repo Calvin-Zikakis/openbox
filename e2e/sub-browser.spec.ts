@@ -175,9 +175,14 @@ test("the right playlist owns its track actions and drives Information", async (
 
   // The menu must mutate the right-side source, not silently do nothing or
   // use whichever playlist happens to be open in the left browser.
-  await rightRows.first().locator('[data-col="title"]').click({ button: "right" });
-  await page.getByRole("menu", { name: "Track" })
-    .getByRole("menuitem", { name: "Remove from Playlist" }).click();
+  // The menu closes on any scroll outside it, and the right grid can still
+  // clamp its scroll as the Information panel settles; on a slow runner that
+  // closed the menu under the click. Open it again until the choice lands.
+  await expect(async () => {
+    await rightRows.first().locator('[data-col="title"]').click({ button: "right" });
+    await page.getByRole("menu", { name: "Track" })
+      .getByRole("menuitem", { name: "Remove from Playlist" }).click({ timeout: 2_000 });
+  }).toPass({ timeout: 15_000 });
   await expect(page.getByRole("contentinfo")).toContainText("Removed 1 track.");
   await expect(panel.getByTestId("browser-title")).toHaveText("New playlist (0 Tracks)");
   await expect(rightRows).toHaveCount(0);
