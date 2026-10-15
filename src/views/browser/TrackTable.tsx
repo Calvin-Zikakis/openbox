@@ -496,6 +496,21 @@ const TrackRow = memo(function TrackRow({
       </div>
     );
   }
+  /**
+   * Takes a reorder drag over this row, on `dragenter` as well as `dragover`:
+   * taking it is what lets the drop happen at all, as the browser refuses one
+   * over an element that did not ask for it. Chromium answers a drop made
+   * just after the list scrolled a new row under a resting pointer from that
+   * row's `dragenter` alone, with no `dragover` between, so a row that took
+   * only `dragover` lost the drop.
+   */
+  const takeReorder = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!reorderable || !isLocalDrag()) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = nativeTrackDragging() ? "copy" : "move";
+    const box = e.currentTarget.getBoundingClientRect();
+    onReorderOver(index, e.clientY > box.top + box.height / 2);
+  };
   return (
     <div
       className={styles.row}
@@ -567,15 +582,8 @@ const TrackRow = memo(function TrackRow({
       // A drag that is let go over nothing still ends. Without this the tree
       // kept offering its playlists as targets afterwards.
       onDragEnd={() => onDragEnd()}
-      onDragOver={(e) => {
-        if (!reorderable || !isLocalDrag()) return;
-        // Taking the event is what lets the drop happen at all; the browser
-        // refuses one over an element that did not ask for it.
-        e.preventDefault();
-        e.dataTransfer.dropEffect = nativeTrackDragging() ? "copy" : "move";
-        const box = e.currentTarget.getBoundingClientRect();
-        onReorderOver(index, e.clientY > box.top + box.height / 2);
-      }}
+      onDragEnter={takeReorder}
+      onDragOver={takeReorder}
       onDrop={(e) => {
         // External files must bubble to the playlist's import target.
         if (!reorderable || !isLocalDrag()) return;
@@ -1840,6 +1848,14 @@ export const TrackTable = memo(function TrackTable({
         ...browseListVars(preferences.view, ROW_H),
       }}
       data-file-over={fileOver || undefined}
+      // Below the last row takes a reorder on entering too, as a row does
+      // (see `takeReorder`): Chromium decides a drop there from `dragenter`.
+      onDragEnter={(e) => {
+        if (carrying.current && onReorder && view.count > 0 && isBelowTracks(e.target, e.clientY)) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = nativeTrackDragging() ? "copy" : "move";
+        }
+      }}
       onDragOver={(e) => {
         if (carrying.current) {
           if (onReorder) autoscroll.move(e.clientX, e.clientY);
