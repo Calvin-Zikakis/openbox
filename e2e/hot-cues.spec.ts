@@ -165,15 +165,27 @@ test("with rekordbox holding the library, setting and clearing are refused and c
     const at = await elapsedSeconds(page);
     return at >= time && at < time + 2;
   };
+  // Played on from A since `since`: past the cue, and no further than the
+  // second the list rounds off plus what has played since the call. A fixed
+  // window ran out on a slow runner, whose poll first looked after the head
+  // had played past it, and the head never comes back. Short of D's cue too,
+  // where the head would be had the call done nothing.
+  const timeD = await cueSeconds(page, "D");
+  const fromA = (since: number) => async () => {
+    const at = await elapsedSeconds(page);
+    return at >= time && at < time + 1.2 + (Date.now() - since) / 1000 && (timeD <= time || at < timeD);
+  };
   await pad(page, "D").click();
   await expect.poll(nearA).toBe(false);
+  let since = Date.now();
   await pad(page, "A").click();
-  await expect.poll(nearA).toBe(true);
+  await expect.poll(fromA(since)).toBe(true);
   // The key calls it too, and clears nothing.
   await pad(page, "D").click();
   await expect.poll(nearA).toBe(false);
+  since = Date.now();
   await page.keyboard.press("1");
-  await expect.poll(nearA).toBe(true);
+  await expect.poll(fromA(since)).toBe(true);
   await page.keyboard.press("Meta+1");
   await page.waitForTimeout(200);
   await expect(pad(page, "A")).toHaveAttribute("aria-pressed", "true");
