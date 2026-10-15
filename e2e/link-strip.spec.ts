@@ -86,4 +86,7 @@ test("a deck takes a track dragged from the library; the mixer does not", async 
   // A mixer cannot be loaded, so it never becomes a target.
   await expect(page.getByLabel("Mixer 33")).not.toHaveAttribute("data-drop-target", "true");
   await page.mouse.up();
+  // The drop is over before the test is: WebKit's browser went down when the
+  // context closed with the drag still ending, and took the next test with it.
+  await expect(deck).not.toHaveAttribute("data-drop-target", "true");
 });
