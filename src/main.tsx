@@ -1,6 +1,5 @@
 import { StrictMode, Suspense, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./app/App";
 import "./styles/base.css";
 import { Localization } from "./i18n";
 import { syncRekordboxBrowseAtStartup } from "./lib/rekordboxBrowse";
@@ -59,4 +58,5 @@ function secondaryWindow(): Promise<ReactNode> | null {
 // on that dynamic import would leave both sides waiting and the window blank.
 const view = secondaryWindow();
 const browse = preferences || sync || log ? Promise.resolve() : syncRekordboxBrowseAtStartup().catch(() => {});
-void Promise.all([view, browse]).then(([secondary]) => mount(secondary ?? <App />));
+const mainWindow = view ?? import("./app/App").then(({ App }) => <App />);
+void Promise.all([mainWindow, browse]).then(([element]) => mount(element));

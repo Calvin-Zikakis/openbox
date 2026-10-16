@@ -107,13 +107,13 @@ pub fn prepare(
     };
     let existing_sources = sources(root, before)?;
     identify_tracks(&mut tracks, before, previous, db_id, &existing_sources);
-    identify_playlists(&mut playlists, previous, record.as_ref());
+    identify_playlists(&mut playlists, previous, record, before);
     let (mut additions, dropped) = device_additions(before, previous, &keys, &playlists);
     if previous.is_none() {
-        additions.extend(rekordbox_device_additions(before, record.as_ref(), &tracks, &playlists));
+        additions.extend(rekordbox_device_additions(before, record, &tracks, &playlists));
     }
     let kept: BTreeSet<u32> = additions.values().flatten().flatten().copied().collect();
-    retain_device_only(root, &current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref(), keep_unlisted, &kept, &dropped)?;
+    retain_device_only(root, &current, &mut tracks, &mut playlists, before, previous, &existing_sources, record, keep_unlisted, &kept, &dropped)?;
     keep_device_additions(&tracks, &mut playlists, &additions)?;
     if keep_unlisted {
         keep_stick_order(&mut playlists, previous);

@@ -691,9 +691,13 @@ async function realBackend(): Promise<Backend> {
 let backendPromise: Promise<Backend> | null = null;
 
 export function getBackend(): Promise<Backend> {
+  const mockBackendEnabled = import.meta.env.MODE === "test"
+    || (typeof __RBL_MOCK_BACKEND__ !== "undefined" && __RBL_MOCK_BACKEND__);
   backendPromise ??= isTauri
     ? realBackend()
-    : import("./backend-mock").then((m) => m.createMockBackend());
+    : mockBackendEnabled
+      ? import("./backend-mock").then((m) => m.createMockBackend())
+      : Promise.reject(new Error("The browser mock backend is not included in this build."));
   return backendPromise;
 }
 

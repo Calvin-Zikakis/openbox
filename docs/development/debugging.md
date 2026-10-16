@@ -64,7 +64,7 @@ listed in [Hardware coverage](../reference/link-testing.md).
 | --- | --- |
 | Native Linux build cannot find WebKit or ALSA | Install the packages in [Getting started](getting-started.md). |
 | Playwright cannot launch a browser | Run `pnpm exec playwright install chromium webkit`. |
-| Production preview tests cannot find assets | Run `pnpm build` before `pnpm e2e`. |
+| Production preview tests cannot find assets | Run `pnpm e2e`; it builds the mock preview before starting Playwright. |
 | Two checkouts attach to the same test server | Give each an `E2E_PORT`. |
 | A write test is refused | Confirm it uses a fixture; do not disable protection to target the real library. |
 | Desktop startup changes version files | Inspect tag-derived synchronization in [Releases](releases.md). |
