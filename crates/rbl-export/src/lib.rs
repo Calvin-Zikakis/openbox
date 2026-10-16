@@ -1014,7 +1014,7 @@ fn export_cancellable_inner(
             });
         }
     }
-    let before = if generation_matches {
+    let mut before = if generation_matches {
         previous.as_ref().and_then(|m| m.baseline.clone()).map_or_else(|| snapshot::Snapshot::read(destination), Ok)?
     } else { snapshot::Snapshot::read(destination)? };
     let trusted = incremental::trusted_paths(destination, previous.as_ref())?;
@@ -1026,7 +1026,8 @@ fn export_cancellable_inner(
             old.db_id = db_id;
         }
     }
-    let rewritten = reconcile::rewritten(destination, &before, previous.as_ref(), tracks, playlists, db_id);
+    let playlist_record = reconcile::playlist_namespace(destination, &mut before, previous.as_ref(), db_id);
+    let rewritten = reconcile::rewritten(playlist_record.as_ref(), &before, previous.as_ref(), tracks, playlists, db_id);
     before.check_baseline_except(previous.as_ref(), db_id, &rewritten)?;
     // Read every analysis file the stick names only once the sync is going
     // ahead: on a large stick that is most of what preparing takes, and a
@@ -1039,7 +1040,7 @@ fn export_cancellable_inner(
         .filter(|p| !p.folder && !p.device_only && p.id != 0 && p.id < reconcile::DEVICE_PLAYLIST_ID_BASE)
         .map(|p| (p.id, p.track_indices.iter().filter_map(|i| tracks.get(*i)).map(|t| track_key(t.id, &t.source_path.to_string_lossy())).collect()))
         .collect();
-    let plan = plan::from_baseline(destination, &before, previous.as_ref(), tracks, playlists, options)?;
+    let plan = plan::from_baseline(destination, &before, previous.as_ref(), tracks, playlists, options, playlist_record.as_ref())?;
     if !plan.unknown_size && fs2::available_space(destination)? < plan.peak_bytes {
         return Err(ExportError::Conflict(format!("Not enough temporary space to sync safely: approximately {} bytes required while the previous library is retained", plan.peak_bytes)));
     }
@@ -1883,7 +1884,7 @@ fn export_cancellable_inner(
     // The sync record, so rekordbox's Sync Manager opens on this selection
     // too. A playlist that is not the library's has no id to record.
     if let Some(sync) = sync {
-        let ticked: Vec<u64> = playlists.iter().filter(|p| !p.folder).map(|p| p.id).filter(|&id| id != 0 && id < reconcile::DEVICE_PLAYLIST_ID_BASE).collect();
+        let ticked: Vec<u64> = playlists.iter().filter(|p| !p.folder && !p.device_only).map(|p| p.id).filter(|&id| id != 0 && id < reconcile::DEVICE_PLAYLIST_ID_BASE).collect();
         let kept = sync_record::read(destination).map(|r| r.timestamps).unwrap_or_default();
         let device_ids = playlists.iter().zip(&playlist_ids).map(|(p, id)| (p.id, *id)).collect();
         let bytes = sync_record::render_with_ids(sync, &ticked, rbl_core::time::unix_millis(), &kept, &device_ids);

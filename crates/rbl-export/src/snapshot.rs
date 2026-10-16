@@ -393,12 +393,17 @@ fn first_difference(legacy: &Library, one: &Library, rewritten: &Rewritten) -> O
 /// not found that way takes a new id above `floor` and every id either
 /// library uses.
 pub(crate) fn legacy_playlist_ids(legacy: &Library, one: &Library, floor: u32) -> BTreeMap<u32, u32> {
+    legacy_playlist_ids_with(legacy, one, floor, &BTreeMap::new())
+}
+
+/// Explicit pairs have already been checked against both sync records and trees.
+pub(crate) fn legacy_playlist_ids_with(legacy: &Library, one: &Library, floor: u32, pairs: &BTreeMap<u32, u32>) -> BTreeMap<u32, u32> {
     let same = |a: &Playlist, b: &Playlist| a.name == b.name && a.folder == b.folder;
     let by_id: BTreeMap<u32, &Playlist> = one.playlists.iter().map(|p| (p.id, p)).collect();
-    let mut ids = BTreeMap::new();
-    let mut claimed = BTreeSet::new();
+    let mut ids = pairs.clone();
+    let mut claimed: BTreeSet<u32> = pairs.values().copied().collect();
     for p in &legacy.playlists {
-        if by_id.get(&p.id).is_some_and(|other| same(p, other)) {
+        if !ids.contains_key(&p.id) && !claimed.contains(&p.id) && by_id.get(&p.id).is_some_and(|other| same(p, other)) {
             ids.insert(p.id, p.id);
             claimed.insert(p.id);
         }

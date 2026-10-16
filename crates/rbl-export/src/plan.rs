@@ -38,17 +38,18 @@ pub fn preview(destination: &Path, tracks: &[SourceTrack], playlists: &[SourcePl
             approximate: false, unknown_size: false, kept_existing: manifest.generation.as_ref().map_or(0, |g| g.kept_existing),
             device_additions: std::collections::BTreeSet::new() });
     }
-    let before = previous.as_ref().filter(|m| m.generation.as_ref().is_some_and(|g| g.databases == signatures))
+    let mut before = previous.as_ref().filter(|m| m.generation.as_ref().is_some_and(|g| g.databases == signatures))
         .and_then(|m| m.baseline.clone()).map_or_else(|| Snapshot::read(destination), Ok)?;
     let db_id = options.sync.map_or(0, |s| s.db_id);
-    let rewritten = crate::reconcile::rewritten(destination, &before, previous.as_ref(), tracks, playlists, db_id);
+    let playlist_record = crate::reconcile::playlist_namespace(destination, &mut before, previous.as_ref(), db_id);
+    let rewritten = crate::reconcile::rewritten(playlist_record.as_ref(), &before, previous.as_ref(), tracks, playlists, db_id);
     before.check_baseline_except(previous.as_ref(), db_id, &rewritten)?;
-    from_baseline(destination, &before, previous.as_ref(), tracks, playlists, options)
+    from_baseline(destination, &before, previous.as_ref(), tracks, playlists, options, playlist_record.as_ref())
 }
 
-pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Option<&Manifest>, tracks: &[SourceTrack], playlists: &[SourcePlaylist], options: &ExportOptions<'_>) -> Result<SyncPlan> {
+pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Option<&Manifest>, tracks: &[SourceTrack], playlists: &[SourcePlaylist], options: &ExportOptions<'_>, record: Option<&crate::sync_record::SyncRecord>) -> Result<SyncPlan> {
     let db_id = options.sync.map_or(0, |s| s.db_id);
-    let crate::reconcile::Prepared { tracks, playlists, device_additions } = crate::reconcile::prepare(destination, before, previous, tracks, playlists, db_id, options.keep_unlisted)?;
+    let crate::reconcile::Prepared { tracks, playlists, device_additions } = crate::reconcile::prepare(destination, before, previous, tracks, playlists, db_id, options.keep_unlisted, record)?;
     let estimate = crate::estimate::estimate_inspected(destination, db_id, &tracks, false, options.compatibility, Some(before), options.cache);
     let trusted = incremental::trusted_paths(destination, previous)?;
     let recorded: std::collections::HashMap<_, _> = previous.into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();

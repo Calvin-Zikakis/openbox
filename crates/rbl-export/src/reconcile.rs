@@ -14,6 +14,62 @@ fn sql(e: impl std::fmt::Display) -> ExportError {
     ExportError::OneLibrary(e.to_string())
 }
 
+/// Establish one playlist ID namespace before planning or checking removals.
+/// [OBS: fixture] the two USB databases can describe the same tree with different
+/// IDs. Each sync file is interpreted against its own database, never the other.
+/// Existing rbxport baselines already use one namespace and keep their edit checks.
+pub(crate) fn playlist_namespace(root: &Path, before: &mut Snapshot, previous: Option<&Manifest>, db_id: u64) -> Option<SyncRecord> {
+    let dir = crate::export_root(root).join("rekordbox");
+    let read = |name: &str, library: &Library| std::fs::read(dir.join(name)).ok()
+        .and_then(|bytes| crate::sync_record::parse(&bytes))
+        .filter(|r| r.db_id == db_id && db_id != 0)
+        .map(|mut r| {
+            let mut counts = BTreeMap::<u32, usize>::new();
+            for id in r.device_ids.values() { *counts.entry(*id).or_default() += 1; }
+            r.device_ids.retain(|master, id| counts.get(id) == Some(&1) && library.playlists.iter().any(|p| p.id == *id && p.folder == r.folders.contains(master)));
+            r
+        });
+    let legacy_record = before.legacy.as_ref().and_then(|library| read("playlists3.sync", library));
+    let plus_record = before.one.as_ref().and_then(|library| read("playlists3Plus.sync", library));
+    if previous.and_then(|m| m.baseline.as_ref()).is_some() {
+        return plus_record.or(legacy_record);
+    }
+    let (Some(legacy), Some(one)) = (&mut before.legacy, &before.one) else {
+        return plus_record.or(legacy_record);
+    };
+    let mut pairs = BTreeMap::new();
+    if let (Some(left), Some(right)) = (&legacy_record, &plus_record) {
+        let unique = |record: &SyncRecord, id: u32| record.device_ids.values().filter(|value| **value == id).count() == 1;
+        // Place parents first, so a same-named row in another folder cannot
+        // silently stand in for this row. Conflicting contents remain separate.
+        loop {
+            let count = pairs.len();
+            for (master, id) in &left.device_ids {
+                let Some(other_id) = right.device_ids.get(master) else { continue };
+                if pairs.contains_key(id) || !unique(left, *id) || !unique(right, *other_id) { continue; }
+                let Some(a) = legacy.playlists.iter().find(|p| p.id == *id) else { continue };
+                let Some(b) = one.playlists.iter().find(|p| p.id == *other_id) else { continue };
+                let same_parent = (a.parent == 0 && b.parent == 0) || pairs.get(&a.parent) == Some(&b.parent);
+                if same_parent && a.name == b.name && a.folder == b.folder && a.tracks == b.tracks {
+                    pairs.insert(*id, *other_id);
+                }
+            }
+            if pairs.len() == count { break; }
+        }
+    }
+    let floor = previous.into_iter().flat_map(|m| &m.playlists).map(|p| p.export_id).max().unwrap_or(0);
+    let ids = crate::snapshot::legacy_playlist_ids_with(legacy, one, floor, &pairs);
+    for node in &mut legacy.playlists {
+        node.id = ids.get(&node.id).copied().unwrap_or(node.id);
+        if node.parent != 0 { node.parent = ids.get(&node.parent).copied().unwrap_or(node.parent); }
+    }
+    plus_record.or_else(|| legacy_record.map(|mut record| {
+        record.device_ids = record.device_ids.into_iter().filter_map(|(master, id)| ids.get(&id).map(|mapped| (master, *mapped))).collect();
+        record
+    }))
+}
+
+#[allow(clippy::too_many_arguments, reason = "shared validated playlist record accompanies the snapshot")]
 pub fn prepare(
     root: &Path,
     before: &Snapshot,
@@ -22,13 +78,13 @@ pub fn prepare(
     playlists: &[SourcePlaylist],
     db_id: u64,
     keep_unlisted: bool,
+    record: Option<&SyncRecord>,
 ) -> Result<Prepared> {
     // The library's entries, by track key, before any track is tied to the
     // device row it came from.
     let keys: Vec<String> = tracks.iter().map(|t| crate::track_key(t.id, &t.source_path.to_string_lossy())).collect();
     let mut tracks = tracks.to_vec();
     let mut playlists = playlists.to_vec();
-    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
     // A playlist carried under a new id must not take one an earlier export
     // recorded: that would read as the library's playlist, and be taken off.
     // Nor one the stick held at that export and has since deleted: that
@@ -266,7 +322,7 @@ fn keep_device_additions(
 /// master ids, and the device playlists `identify_playlists` names. Worked
 /// out from the snapshot alone, before any analysis file is read.
 pub fn rewritten(
-    root: &Path,
+    record: Option<&SyncRecord>,
     before: &Snapshot,
     previous: Option<&Manifest>,
     tracks: &[SourceTrack],
@@ -291,9 +347,8 @@ pub fn rewritten(
             }
         }
     }
-    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
     let mut playlists = playlists.to_vec();
-    identify_playlists(&mut playlists, previous, record.as_ref());
+    identify_playlists(&mut playlists, previous, record, before);
     out.playlists = playlists.iter().map(|p| p.device_id).filter(|id| *id != 0).collect();
     out
 }
@@ -370,6 +425,7 @@ fn identify_playlists(
     playlists: &mut [SourcePlaylist],
     previous: Option<&Manifest>,
     record: Option<&SyncRecord>,
+    before: &Snapshot,
 ) {
     for p in playlists {
         if p.device_id != 0 {
@@ -379,10 +435,11 @@ fn identify_playlists(
             .and_then(|m| {
                 m.playlists
                     .iter()
-                    .find(|old| old.library_id == p.id && p.id != 0 && !old.device_only)
+                    .find(|old| old.library_id == p.id && p.id != 0 && p.id < DEVICE_PLAYLIST_ID_BASE)
             })
             .map(|p| p.export_id)
             .or_else(|| record.and_then(|r| r.device_ids.get(&p.id).copied()))
+            .filter(|id| before.legacy.iter().chain(&before.one).any(|library| library.playlists.iter().any(|node| node.id == *id && node.folder == p.folder)))
             .unwrap_or(0);
     }
 }
@@ -416,20 +473,14 @@ fn retain_device_only(
     dropped: &BTreeSet<u32>,
 ) -> Result<()> {
     // Device playlist id -> the library id it was exported from.
-    let owned: BTreeMap<u32, u64> = previous.map_or_else(
-        || {
-            record
-                .map(|r| r.device_ids.iter().map(|(library, device)| (*device, *library)).collect())
-                .unwrap_or_default()
-        },
-        |m| {
-            m.playlists
-                .iter()
-                .filter(|p| !p.device_only && p.export_id != 0)
-                .map(|p| (p.export_id, p.library_id))
-                .collect()
-        },
-    );
+    // A foreign sync record establishes correspondence, not permission to
+    // delete unchecked playlists on the first adoption. Only our own baseline
+    // establishes ownership; carried playlists remain device-only thereafter.
+    let owned: BTreeMap<u32, u64> = previous
+        .filter(|m| m.baseline.is_some())
+        .into_iter().flat_map(|m| &m.playlists)
+        .filter(|p| !p.device_only && p.export_id != 0)
+        .map(|p| (p.export_id, p.library_id)).collect();
     // Kept as the library's: owned, with a library id the selection does not
     // already use for another playlist.
     let kept_owned: BTreeMap<u32, u64> = if keep_unlisted {
@@ -446,7 +497,15 @@ fn retain_device_only(
         .iter()
         .filter(|p| (!owned.contains_key(&p.id) || kept_owned.contains_key(&p.id)) && !playlists.iter().any(|n| n.device_id == p.id))
         .collect();
-    let retained_id = |device: u32| kept_owned.get(&device).copied().unwrap_or(DEVICE_PLAYLIST_ID_BASE + u64::from(device));
+    // Preserve a known correspondence without granting deletion ownership.
+    // This lets a later selection adopt a carried playlist instead of duplicating it.
+    let identities: BTreeMap<u32, u64> = record.into_iter().flat_map(|r| &r.device_ids)
+        .map(|(master, device)| (*device, *master))
+        .chain(previous.into_iter().flat_map(|m| &m.playlists)
+            .filter(|p| p.library_id != 0 && p.library_id < DEVICE_PLAYLIST_ID_BASE)
+            .map(|p| (p.export_id, p.library_id)))
+        .filter(|(_, master)| !playlists.iter().any(|p| p.id == *master)).collect();
+    let retained_id = |device: u32| kept_owned.get(&device).or_else(|| identities.get(&device)).copied().unwrap_or(DEVICE_PLAYLIST_ID_BASE + u64::from(device));
     let mut needed: BTreeSet<u32> = retained
         .iter()
         .flat_map(|p| &p.tracks)
