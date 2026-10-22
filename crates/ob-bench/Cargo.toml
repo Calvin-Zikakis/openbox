@@ -16,6 +16,10 @@ serde_json = { workspace = true }
 ob-analysis = { path = "../ob-analysis" }
 rbl-analysis = { path = "../rbl-analysis" }
 rbl-audio = { path = "../rbl-audio" }
+# `ob-bench library` reads a copy of the installed rekordbox library.
+rbl-anlz = { path = "../rbl-anlz" }
+rbl-db = { path = "../rbl-db" }
+rbl-index = { path = "../rbl-index" }
 # `RUST_LOG=rbl_analysis=debug` prints the analyzer's decisions.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

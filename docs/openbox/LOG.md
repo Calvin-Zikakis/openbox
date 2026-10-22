@@ -2,6 +2,28 @@
 
 Newest first. Each entry says what was done, what was measured, and what comes next.
 
+## 2026-10-21 (later)
+
+**Real music**
+
+- `ob-bench library` compares analyzers against the grids in the installed rekordbox
+  library, reading only a copy of `master.db`. **Blocked:** 929 of the 947 analyzed
+  tracks' files are not on this machine. Needs the drive with the DJ collection, or a
+  rekordbox USB export.
+- `ob-bench files` runs every analyzer on any audio files. Research note
+  [003](research/003-real-masters.md), on 11 real masters plus 6 renders of one: openbox
+  and rbxport agree on every Normal-preset grid. Tempo following split 2 constant
+  masters into segments. One track is a genuine half-beat coin flip.
+
+**Next**
+
+1. Confidence and flags in `ob-analysis` (half-beat ambiguity, bar ambiguity, possible
+   tempo change), and default to one constant grid.
+2. A better kick-versus-bass judge for the ambiguous case, including neural beat
+   activations (Beat This!).
+3. The 1 ms placement bias.
+4. Make the openbox analyzer selectable in the app.
+
 ## 2026-10-21
 
 **Fork and setup**

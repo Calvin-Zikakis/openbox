@@ -5,8 +5,13 @@
 //! cargo run --release -p ob-bench -- eval [--analyzer rbxport,rbxport-normal] [--filter TEXT] [--jobs N] [--json PATH] [--quiet]
 //! cargo run --release -p ob-bench -- render OUT_DIR [--filter TEXT]
 //! cargo run --release -p ob-bench -- probe --filter TEXT
+//! cargo run --release -p ob-bench -- library [--limit N] [--filter TITLE] [--jobs N]
+//! cargo run --release -p ob-bench -- files [--same-song] FILE...
 //! ```
 #![allow(clippy::print_stdout, clippy::print_stderr, reason = "a command-line report")]
+
+mod files;
+mod library;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,6 +31,8 @@ struct Args {
     jobs: usize,
     json: Option<PathBuf>,
     quiet: bool,
+    limit: Option<usize>,
+    same_song: bool,
 }
 
 fn parse() -> Result<Args, String> {
@@ -33,7 +40,7 @@ fn parse() -> Result<Args, String> {
     let command = raw.next().unwrap_or_else(|| "eval".to_owned());
     let cores = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
     // rbxport's analysis runs about seven stages in parallel per track.
-    let mut args = Args { command, positional: Vec::new(), analyzers: ["rbxport", "rbxport-normal", "openbox", "openbox-normal"].map(str::to_owned).to_vec(), filter: None, jobs: (cores / 3).max(1), json: None, quiet: false };
+    let mut args = Args { command, positional: Vec::new(), analyzers: ["rbxport", "rbxport-normal", "openbox", "openbox-normal"].map(str::to_owned).to_vec(), filter: None, jobs: (cores / 3).max(1), json: None, quiet: false, limit: None, same_song: false };
     while let Some(arg) = raw.next() {
         let mut value = |name: &str| raw.next().ok_or_else(|| format!("{name} needs a value"));
         match arg.as_str() {
@@ -42,6 +49,8 @@ fn parse() -> Result<Args, String> {
             "--jobs" => args.jobs = value("--jobs")?.parse().map_err(|_| "--jobs takes a number".to_owned())?,
             "--json" => args.json = Some(PathBuf::from(value("--json")?)),
             "--quiet" => args.quiet = true,
+            "--same-song" => args.same_song = true,
+            "--limit" => args.limit = Some(value("--limit")?.parse().map_err(|_| "--limit takes a number".to_owned())?),
             other if other.starts_with("--") => return Err(format!("unknown option {other}")),
             other => args.positional.push(other.to_owned()),
         }
@@ -79,6 +88,8 @@ fn main() {
         "eval" => eval(&args),
         "render" => render_to(&args),
         "probe" => probe(&args),
+        "library" => library::run(args.limit, args.jobs, args.filter.as_deref()),
+        "files" => files::run(&args.positional, args.same_song),
         other => {
             eprintln!("unknown command {other:?}; use list, eval or render");
             std::process::exit(2);
