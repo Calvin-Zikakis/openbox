@@ -166,7 +166,8 @@ export interface AudioPreferences {
   metronomeVolume: MetronomeVolume;
 }
 
-export type AnalysisMode = "rekordbox" | "rbxport";
+// openbox: "openbox" runs ob-analysis (one constant grid, judged phase and bar).
+export type AnalysisMode = "rekordbox" | "rbxport" | "openbox";
 
 /**
  * Rekordbox's BPM Range choices, in its order, 70–180 the default
@@ -369,7 +370,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
     metronomeVolume: "large",
   },
   analysis: {
-    mode: "rbxport",
+    mode: "openbox",
     concurrentTracks: SLOTS,
     auto: false,
     firstBeatCue: false,
@@ -547,7 +548,7 @@ export function sanitisePreferences(value: unknown): Preferences {
       metronomeVolume: oneOf(audio.metronomeVolume, METRONOME_VOLUMES, d.audio.metronomeVolume),
     },
     analysis: {
-      mode: oneOf(analysis.mode, ["rekordbox", "rbxport"], d.analysis.mode),
+      mode: oneOf(analysis.mode, ["rekordbox", "rbxport", "openbox"], d.analysis.mode),
       concurrentTracks: oneOfNumber(analysis.concurrentTracks, ANALYSIS_SLOTS, SLOTS),
       auto: bool(analysis.auto, d.analysis.auto),
       firstBeatCue: bool(analysis.firstBeatCue, d.analysis.firstBeatCue),

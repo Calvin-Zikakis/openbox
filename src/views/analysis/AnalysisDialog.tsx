@@ -76,12 +76,15 @@ export function AnalysisDialog({ count, auto = false, initialMode, initialBpmRan
               <select value={settings.mode} onChange={event => update({ mode: event.target.value as AnalysisMode })}>
                 <option value="rekordbox">{t("Normal")}</option>
                 <option value="rbxport">{t("RBXport (Electronic Music)")}</option>
+                <option value="openbox">{t("openbox (Precise Grid)")}</option>
               </select>
             </label>
             <p className={styles.modeBlurb}>
               {settings.mode === "rbxport"
                 ? t("Allows tempo changes and builds a variable beat grid. Intended for electronic music.")
-                : t("Analyses the track as one steady BPM with a single, constant beat grid.")}
+                : settings.mode === "openbox"
+                  ? t("One constant beat grid on the kicks. Whether it sits on the beat and which beat is 1 are checked against the kick, the song's structure and a neural beat model.")
+                  : t("Analyses the track as one steady BPM with a single, constant beat grid.")}
             </p>
             <label className={styles.field}>
               <span>{t("BPM Range")}</span>

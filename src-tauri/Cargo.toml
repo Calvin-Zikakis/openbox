@@ -34,6 +34,8 @@ rbl-db = { path = "../crates/rbl-db" }
 rbl-index = { path = "../crates/rbl-index" }
 rbl-anlz = { path = "../crates/rbl-anlz" }
 rbl-analysis = { path = "../crates/rbl-analysis" }
+# openbox: the analyzer behind the "openbox" analysis mode.
+ob-analysis = { path = "../crates/ob-analysis" }
 rbl-audio = { path = "../crates/rbl-audio" }
 rbl-deck = { path = "../crates/rbl-deck" }
 rbl-prolink = { path = "../crates/rbl-prolink" }

@@ -66,11 +66,23 @@ pub struct AnalysisSettings {
     /// Add a memory cue on the first beat of the new grid, unless one is
     /// already there. Only a BPM / Grid pass has a grid to place it on.
     pub first_beat_cue: bool,
+    /// openbox: which analyzer runs, set from the command's mode.
+    #[serde(skip)]
+    pub engine: Engine,
+}
+
+/// openbox: rbxport's analyzer, or openbox's (`ob-analysis`), which reuses
+/// rbxport's stages with its own grid phase and bar decisions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Engine {
+    #[default]
+    Rbxport,
+    Openbox,
 }
 
 impl Default for AnalysisSettings {
     fn default() -> Self {
-        Self { bpm_grid: true, key: true, high_precision: true, min_bpm: 70.0, max_bpm: 180.0, first_beat_cue: false }
+        Self { bpm_grid: true, key: true, high_precision: true, min_bpm: 70.0, max_bpm: 180.0, first_beat_cue: false, engine: Engine::Rbxport }
     }
 }
 
@@ -143,16 +155,18 @@ pub async fn analyse_track<R: tauri::Runtime>(
     key_tag: Option<crate::key_tag::KeyNotation>,
     drawing: Option<bool>,
 ) -> AppResult<AnalysisResultDto> {
-    let preset = match mode.as_deref().unwrap_or("rbxport") {
-        "rekordbox" => rbl_analysis::AnalysisPreset::Rekordbox,
-        "rbxport" => rbl_analysis::AnalysisPreset::Rbxport,
+    let (preset, engine) = match mode.as_deref().unwrap_or("rbxport") {
+        "rekordbox" => (rbl_analysis::AnalysisPreset::Rekordbox, Engine::Rbxport),
+        "rbxport" => (rbl_analysis::AnalysisPreset::Rbxport, Engine::Rbxport),
+        // openbox: one constant grid, placed and numbered by ob-analysis.
+        "openbox" => (rbl_analysis::AnalysisPreset::Rekordbox, Engine::Openbox),
         _ => return Err(AppError::new(ErrorKind::Malformed, "Unknown analysis mode.")),
     };
     let library = state.library()?;
     let share = state.share_root();
     let state = Arc::clone(&state);
     let editor = Arc::clone(&editor);
-    let settings = settings.unwrap_or_default();
+    let settings = AnalysisSettings { engine, ..settings.unwrap_or_default() };
     let drawing = drawing.unwrap_or(false);
     let drawn = track_id.clone();
     let progress = {
@@ -238,7 +252,7 @@ fn analyse_and_save(
         let audio = rbl_audio::decode_mono(std::path::Path::new(path), Some(DECODE_CAP_SECS)).map_err(|e| decode_error(&e))?;
         return analyse_key_only(state, library, row, track_id, &audio, editor, started);
     }
-    let (analysis, duration_secs) = analyse_file(std::path::Path::new(path), &options, DECODE_CAP_SECS, drawing)?;
+    let (analysis, duration_secs) = analyse_file_with(std::path::Path::new(path), &options, DECODE_CAP_SECS, drawing, settings.engine)?;
 
     let _edit_guard = state.edit_gate.lock();
     ensure_analysis_unlocked(state, editor, track_id)?;
@@ -343,11 +357,23 @@ fn decode_error(e: &rbl_audio::AudioError) -> AppError {
 /// watching asks for it.
 ///
 /// Resolves to the analysis and the file's length in seconds.
+#[cfg(test)]
 fn analyse_file(
     path: &std::path::Path,
     options: &rbl_analysis::AnalysisOptions,
     head_secs: f64,
     drawing: Option<&Drawing<'_>>,
+) -> AppResult<(rbl_analysis::Analysis, f64)> {
+    analyse_file_with(path, options, head_secs, drawing, Engine::Rbxport)
+}
+
+/// [`analyse_file`] with the analyzer chosen.
+fn analyse_file_with(
+    path: &std::path::Path,
+    options: &rbl_analysis::AnalysisOptions,
+    head_secs: f64,
+    drawing: Option<&Drawing<'_>>,
+    engine: Engine,
 ) -> AppResult<(rbl_analysis::Analysis, f64)> {
     let mut stream = rbl_audio::MonoStream::open(path).map_err(|e| decode_error(&e))?;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "a positive number of seconds at an audio rate")]
@@ -398,7 +424,10 @@ fn analyse_file(
     }
     let rate = stream.sample_rate();
     let audio = rbl_audio::Audio { samples: head, sample_rate: rate, source_channels: stream.source_channels() };
-    let mut analysis = rbl_analysis::analyse_with(&audio.samples, rate, *options);
+    let mut analysis = match engine {
+        Engine::Rbxport => rbl_analysis::analyse_with(&audio.samples, rate, *options),
+        Engine::Openbox => ob_analysis::analyse(&audio.samples, rate, &ob_analysis::Options::with(*options)).analysis,
+    };
     let Some(builder) = builder.filter(|_| past_head) else {
         return Ok((analysis, audio.duration_secs()));
     };
@@ -963,5 +992,23 @@ mod tests {
         for (min_bpm, max_bpm) in [(180.0, 70.0), (70.0, 70.0), (0.0, 180.0), (70.0, 301.0), (f64::NAN, 180.0)] {
             assert!(AnalysisSettings { min_bpm, max_bpm, ..defaults }.options(preset).is_err());
         }
+    }
+
+    #[test]
+    fn the_openbox_engine_grids_the_fixture_track_as_rbxport_does() {
+        // openbox: a steady click has one right grid, and both engines must find it.
+        use rbl_db::fixture::track_id;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (state, location) = unanalysed_click_track(dir.path());
+        let library = state.library().unwrap();
+        let share = location.share_root.clone();
+        let editor = crate::grid::GridEditor::at(&dir.path().join("editor"));
+        let normal = rbl_analysis::AnalysisPreset::Rekordbox;
+        let rbxport = analyse_and_save(&state, &library, &share, &track_id(0), normal, &AnalysisSettings::default(), &editor, None).expect("rbxport");
+        let openbox = AnalysisSettings { engine: Engine::Openbox, ..AnalysisSettings::default() };
+        let openbox = analyse_and_save(&state, &library, &share, &track_id(0), normal, &openbox, &editor, None).expect("openbox");
+        assert_eq!(openbox.bpm_x100, rbxport.bpm_x100);
+        assert_eq!(openbox.beats, rbxport.beats);
     }
 }

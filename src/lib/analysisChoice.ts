@@ -19,7 +19,7 @@ export function lastAnalysisChoice(): Partial<RememberedAnalysisChoice> {
     for (const flag of ["bpmGrid", "key", "highPrecision"] as const) {
       if (typeof saved[flag] === "boolean") out[flag] = saved[flag];
     }
-    if (saved.mode === "rekordbox" || saved.mode === "rbxport") out.mode = saved.mode;
+    if (saved.mode === "rekordbox" || saved.mode === "rbxport" || saved.mode === "openbox") out.mode = saved.mode;
     if (typeof saved.minBpm === "number" && typeof saved.maxBpm === "number") {
       out.minBpm = saved.minBpm;
       out.maxBpm = saved.maxBpm;

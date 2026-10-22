@@ -22,11 +22,14 @@ export function AnalysisPane(_: { tab: AnalysisTab }) {
       <div className={styles.analysisField}>
         <Select label="Analysis mode" caption="Analysis mode" plain value={preferences.analysis.mode}
           choices={[{ value: "rekordbox", label: "Rekordbox · Normal" },
-            { value: "rbxport", label: "RBXport (for Electronic Music)" }]}
+            { value: "rbxport", label: "RBXport (for Electronic Music)" },
+            { value: "openbox", label: "openbox (Precise Grid)" }]}
           onChange={mode => update("analysis", { mode })} />
         <p aria-live="polite">{preferences.analysis.mode === "rekordbox"
           ? "Normal mode: one constant tempo for the whole track, with high-precision beat placement and key detection."
-          : "Aligns beats to kick drums, uses musical phrase changes to find the first beat of each bar, and detects tempo changes and key."}</p>
+          : preferences.analysis.mode === "openbox"
+            ? "One constant tempo with beats on the kick drums. Whether the grid sits on the beat and which beat is 1 are checked against the kick, the song's structure and a neural beat model."
+            : "Aligns beats to kick drums, uses musical phrase changes to find the first beat of each bar, and detects tempo changes and key."}</p>
       </div>
       <div className={styles.analysisField}>
         <Select label="BPM Range" caption="BPM Range" plain preserveChoiceLabels value={preferences.analysis.bpmRange}
