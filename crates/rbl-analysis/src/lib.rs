@@ -43,7 +43,7 @@ pub struct Analysis {
 
 /// Beats before the first downbeat, in `0..4`, for a grid whose downbeat is
 /// nearest `downbeat_secs`.
-fn phase_for(segments: &[tempo::Segment], downbeat_secs: f64) -> usize {
+pub fn phase_for(segments: &[tempo::Segment], downbeat_secs: f64) -> usize {
     let unnumbered = tempo::beats_of(segments, 0);
     let index = unnumbered
         .iter()
@@ -227,7 +227,7 @@ fn level(samples: &[f32]) -> (f32, f32) {
 /// audio starting in the first millisecond. A later onset or silent intro
 /// must not become beat 1.1 at zero. This uses full-band audio, not a
 /// particular instrument or the kick detector's frequency band.
-fn anchor_file_start(tempo: &mut TempoResult, samples: &[f32], sample_rate: u32, downbeat_secs: f64) {
+pub fn anchor_file_start(tempo: &mut TempoResult, samples: &[f32], sample_rate: u32, downbeat_secs: f64) {
     let Some(first) = tempo.segments.first() else { return };
     let reach = attack::AttackOptions::default().reach_secs;
     if sample_rate == 0 || first.from_secs > reach || first.period_secs <= 0.0 || tempo.beats.is_empty() {

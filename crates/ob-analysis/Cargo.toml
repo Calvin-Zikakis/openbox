@@ -1,0 +1,14 @@
+[package]
+name = "ob-analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "openbox's track analyzer: rbxport's stages with openbox's grid phase, bar and placement decisions."
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+rbl-analysis = { path = "../rbl-analysis" }

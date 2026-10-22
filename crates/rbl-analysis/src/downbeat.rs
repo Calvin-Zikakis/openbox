@@ -43,14 +43,14 @@ pub const BANDS: usize = BAND_EDGES.len() - 1;
 /// The bar lengths novelty is measured over, in half beats: one, two, four
 /// and eight bars. One bar catches the bass line changing; eight catches
 /// the drop.
-const SCALES: [usize; 4] = [8, 16, 32, 64];
+pub const SCALES: [usize; 4] = [8, 16, 32, 64];
 
 /// Minimum four-bar change in the Euclidean distance of mean log-band
 /// energies. Below this, FFT alignment noise must not decide bar position.
-const MIN_STRUCTURE_NOVELTY: f64 = 0.5;
+pub const MIN_STRUCTURE_NOVELTY: f64 = 0.5;
 
 /// Half beats in a bar.
-const POSITIONS: usize = 8;
+pub const POSITIONS: usize = 8;
 
 /// Beats a tempo segment needs before its bar position is decided from its
 /// own music rather than carried over: eight bars, enough for a four-bar
@@ -148,7 +148,7 @@ const MIN_PHRASE_PEAK: f64 = 0.3;
 
 /// The novelty at every slot at one scale, with everything but local
 /// maxima set to zero, as `(slot, novelty)` for the maxima.
-fn novelty_peaks(profiles: &[[f64; BANDS]], scale: usize) -> Vec<(usize, f64)> {
+pub fn novelty_peaks(profiles: &[[f64; BANDS]], scale: usize) -> Vec<(usize, f64)> {
     let n = profiles.len();
     if n < scale * 2 {
         return Vec::new();
