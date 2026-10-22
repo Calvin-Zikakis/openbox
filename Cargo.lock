@@ -3028,6 +3028,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ob-analysis"
+version = "1.9.0"
+dependencies = [
+ "rbl-analysis",
+]
+
+[[package]]
+name = "ob-bench"
+version = "1.9.0"
+dependencies = [
+ "ob-analysis",
+ "rbl-analysis",
+ "rbl-audio",
+ "serde",
+ "serde_json",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "objc"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

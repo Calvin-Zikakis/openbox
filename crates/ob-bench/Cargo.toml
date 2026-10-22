@@ -1,0 +1,24 @@
+[package]
+name = "ob-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "openbox's beat-grid benchmark: synthetic tracks with exact ground truth, and millisecond scoring."
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+ob-analysis = { path = "../ob-analysis" }
+rbl-analysis = { path = "../rbl-analysis" }
+rbl-audio = { path = "../rbl-audio" }
+# `RUST_LOG=rbl_analysis=debug` prints the analyzer's decisions.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[[bin]]
+name = "ob-bench"
+path = "src/main.rs"
