@@ -7,6 +7,7 @@ Keep each hook as small as possible, and add a line here in the same commit.
 | File | Change | Why |
 | --- | --- | --- |
 | `crates/rbl-analysis/src/lib.rs` | `phase_for` and `anchor_file_start` made `pub` | `ob-analysis` runs rbxport's stages with its own phase decision, then numbers and anchors the grid exactly as rbxport does |
+| `.gitignore` | `/models/` appended | neural models are downloaded by `scripts/openbox/fetch-models.sh`, never committed |
 | `README.md` | a four-line banner at the top pointing to `docs/openbox/` | so the fork says what it is on GitHub |
 | `crates/rbl-analysis/src/downbeat.rs` | `novelty_peaks`, `SCALES`, `MIN_STRUCTURE_NOVELTY` and `POSITIONS` made `pub` | `ob-analysis::phase` reuses rbxport's structural scoring and its "nothing changes" test instead of copying them |
 

@@ -1,0 +1,15 @@
+[package]
+name = "ob-ml"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "openbox's neural evidence: frame-level beat and downbeat activations from Beat This!."
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# MIT. Pure-Rust inference (rten) by default; no decoder, no CLI.
+beat-this = { version = "=1.1.0", default-features = false }

@@ -14,6 +14,7 @@ workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 ob-analysis = { path = "../ob-analysis" }
+ob-ml = { path = "../ob-ml" }
 rbl-analysis = { path = "../rbl-analysis" }
 rbl-audio = { path = "../rbl-audio" }
 # `ob-bench library` reads a copy of the installed rekordbox library.

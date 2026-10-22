@@ -14,6 +14,7 @@
 
 pub mod analyzers;
 pub mod metrics;
+pub mod neural;
 pub mod synth;
 pub mod truth;
 pub mod wav;

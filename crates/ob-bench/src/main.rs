@@ -40,7 +40,7 @@ fn parse() -> Result<Args, String> {
     let command = raw.next().unwrap_or_else(|| "eval".to_owned());
     let cores = std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get);
     // rbxport's analysis runs about seven stages in parallel per track.
-    let mut args = Args { command, positional: Vec::new(), analyzers: ["rbxport", "rbxport-normal", "openbox", "openbox-normal"].map(str::to_owned).to_vec(), filter: None, jobs: (cores / 3).max(1), json: None, quiet: false, limit: None, same_song: false };
+    let mut args = Args { command, positional: Vec::new(), analyzers: ["rbxport-normal", "openbox-dsp-normal", "openbox-normal"].map(str::to_owned).to_vec(), filter: None, jobs: (cores / 3).max(1), json: None, quiet: false, limit: None, same_song: false };
     while let Some(arg) = raw.next() {
         let mut value = |name: &str| raw.next().ok_or_else(|| format!("{name} needs a value"));
         match arg.as_str() {
@@ -62,8 +62,10 @@ fn analyzer(name: &str) -> Option<Box<dyn Analyzer>> {
     match name {
         "rbxport" => Some(Box::new(Rbxport(AnalysisPreset::Rbxport))),
         "rbxport-normal" => Some(Box::new(Rbxport(AnalysisPreset::Rekordbox))),
-        "openbox" => Some(Box::new(Openbox(AnalysisPreset::Rbxport))),
-        "openbox-normal" => Some(Box::new(Openbox(AnalysisPreset::Rekordbox))),
+        "openbox" => Some(Box::new(Openbox { preset: AnalysisPreset::Rbxport, neural: true })),
+        "openbox-normal" => Some(Box::new(Openbox { preset: AnalysisPreset::Rekordbox, neural: true })),
+        "openbox-dsp" => Some(Box::new(Openbox { preset: AnalysisPreset::Rbxport, neural: false })),
+        "openbox-dsp-normal" => Some(Box::new(Openbox { preset: AnalysisPreset::Rekordbox, neural: false })),
         _ => None,
     }
 }
@@ -88,6 +90,8 @@ fn main() {
         "eval" => eval(&args),
         "render" => render_to(&args),
         "probe" => probe(&args),
+        "neural" => neural(&args),
+        "neural-speed" => neural_speed(&args),
         "library" => library::run(args.limit, args.jobs, args.filter.as_deref()),
         "files" => files::run(&args.positional, args.same_song),
         other => {
@@ -130,7 +134,7 @@ fn eval(args: &Args) {
     let mut analyzers = Vec::new();
     for name in &args.analyzers {
         let Some(a) = analyzer(name) else {
-            eprintln!("unknown analyzer {name:?}; known: rbxport, rbxport-normal, openbox, openbox-normal");
+            eprintln!("unknown analyzer {name:?}; known: rbxport, rbxport-normal, openbox, openbox-normal, openbox-dsp, openbox-dsp-normal");
             std::process::exit(2);
         };
         analyzers.push(a);
@@ -263,5 +267,60 @@ fn probe(args: &Args) {
         println!("{:<24} fit phase {:.3} beat  {verdict}", spec.name, frac);
         println!("    structure scores by half-beat position (even = grid beat): {}", scores.iter().map(|v| format!("{v:.2}")).collect::<Vec<_>>().join(" "));
         println!("    kick band: on grid beats {on:.1}, on midpoints {mid:.1}");
+    }
+}
+
+/// How the neural model judges the true grid of each synthetic track: its
+/// beat activation on the true beats over the midpoints, and whether its
+/// downbeat activation peaks on the true bar position.
+fn neural(args: &Args) {
+    let size = if args.analyzers.iter().any(|a| a == "small") { ob_ml::Size::Small } else { ob_ml::Size::Full };
+    if !ob_ml::available(size) {
+        eprintln!("models missing: run scripts/openbox/fetch-models.sh --full");
+        return;
+    }
+    let (mut right, mut total, mut on_beat) = (0, 0, 0);
+    for spec in selected(args.filter.as_deref()) {
+        let track = render(&spec);
+        let started = Instant::now();
+        let Some(act) = ob_ml::activations(&track.samples, track.sample_rate, size) else { continue };
+        let ms = started.elapsed().as_secs_f64() * 1000.0;
+        let beats: Vec<f64> = track.truth.beats.iter().map(|b| b.secs).collect();
+        let (ratio, bar) = ob_bench::neural::evidence(&act, &beats);
+        let truth_position = track.truth.beats.iter().position(|b| b.number == 1).unwrap_or(0) % 4;
+        let best = (0..4).max_by(|a, b| bar[*a].total_cmp(&bar[*b])).unwrap_or(0);
+        total += 1;
+        right += usize::from(best == truth_position);
+        on_beat += usize::from(ratio > 1.0);
+        println!(
+            "{:<24} beat ratio {:>9.2}  downbeat {:?} best {best} truth {truth_position} {}  {ms:.0} ms",
+            spec.name,
+            ratio,
+            bar.map(|v| (v * 100.0).round() / 100.0),
+            if best == truth_position { "ok" } else { "WRONG" }
+        );
+    }
+    println!("\non the beat: {on_beat}/{total}   downbeat position right: {right}/{total}");
+}
+
+/// How long the neural model takes on stretches of the first file given.
+fn neural_speed(args: &Args) {
+    let Some(path) = args.positional.first() else { return };
+    let Ok(audio) = rbl_audio::decode_mono(std::path::Path::new(path), None) else { return };
+    let sr = audio.sample_rate as usize;
+    for size in [ob_ml::Size::Full, ob_ml::Size::Small] {
+        // The first call loads the model.
+        let t = Instant::now();
+        let _ = ob_ml::activations(&audio.samples[..sr * 5], audio.sample_rate, size);
+        println!("{size:?}: load + 5 s: {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+        for secs in [8, 10, 12, 15, 20, 25, 30] {
+            let n = (sr * secs).min(audio.samples.len());
+            let t = Instant::now();
+            let _ = ob_ml::activations(&audio.samples[..n], audio.sample_rate, size);
+            println!("  {secs:>4} s of audio: {:>6.0} ms", t.elapsed().as_secs_f64() * 1000.0);
+        }
+        let t = Instant::now();
+        let _ = ob_ml::activations(&audio.samples, audio.sample_rate, size);
+        println!("  whole track ({:.0} s): {:.0} ms", audio.duration_secs(), t.elapsed().as_secs_f64() * 1000.0);
     }
 }

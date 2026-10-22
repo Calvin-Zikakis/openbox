@@ -26,19 +26,32 @@ impl Analyzer for Rbxport {
     }
 }
 
-/// openbox's analyzer with one of rbxport's app presets.
-pub struct Openbox(pub AnalysisPreset);
+/// openbox's analyzer with one of rbxport's app presets, with or without
+/// the neural judge.
+pub struct Openbox {
+    pub preset: AnalysisPreset,
+    pub neural: bool,
+}
+
+impl Openbox {
+    pub fn options(&self) -> ob_analysis::Options {
+        let options = ob_analysis::Options::preset(self.preset);
+        if self.neural { options } else { options.without_neural() }
+    }
+}
 
 impl Analyzer for Openbox {
     fn name(&self) -> &'static str {
-        match self.0 {
-            AnalysisPreset::Rbxport => "openbox",
-            AnalysisPreset::Rekordbox => "openbox-normal",
+        match (self.preset, self.neural) {
+            (AnalysisPreset::Rbxport, true) => "openbox",
+            (AnalysisPreset::Rekordbox, true) => "openbox-normal",
+            (AnalysisPreset::Rbxport, false) => "openbox-dsp",
+            (AnalysisPreset::Rekordbox, false) => "openbox-dsp-normal",
         }
     }
 
     fn analyse(&self, samples: &[f32], sample_rate: u32) -> Prediction {
-        let result = ob_analysis::analyse(samples, sample_rate, self.0.options());
+        let result = ob_analysis::analyse(samples, sample_rate, &self.options());
         prediction_of(&result.analysis.tempo)
     }
 }

@@ -2,6 +2,35 @@
 
 Newest first. Each entry says what was done, what was measured, and what comes next.
 
+## 2026-10-21 (evening)
+
+**Neural judge**
+
+- `crates/ob-ml`: Beat This! activations (MIT, pure-Rust inference), with models fetched
+  and checksum-checked by `scripts/openbox/fetch-models.sh`. Decision
+  [0003](decisions/0003-neural-judge.md), research note [004](research/004-neural-judge.md).
+- On the true synthetic grids it is right 40 of 40 on the half beat and 40 of 40 on the
+  downbeat (full model).
+- `ob-analysis` lets it decide the half beat when decisive, and blends it with structure
+  for beat 1, with `bar_conflict` and `half_beat_conflict` flags.
+- On real masters it moves one off-beat grid (ROUZ - The One) back onto the kick, and
+  changes beat 1 on two of the owner's tracks. Those two are flagged as conflicts, and
+  only the owner can confirm them.
+- Cost: four 20-second excerpts, about 1.5 s per track on the CPU.
+
+**Needs the owner**
+
+- Where beat 1 is on "ROUZ - The One" and "ROUZ & Wyllie - Perceive" (see the end of
+  note 004).
+- The drive or USB stick holding the DJ library, for `ob-bench library`.
+
+**Next**
+
+1. GPU inference (ONNX Runtime with CoreML) for the neural judge.
+2. The 1 ms placement bias.
+3. Make the openbox analyzer selectable in the app.
+4. Default to one constant grid, and flag possible tempo changes.
+
 ## 2026-10-21 (later)
 
 **Real music**

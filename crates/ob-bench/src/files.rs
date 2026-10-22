@@ -57,9 +57,8 @@ fn lag_secs(reference: &onset::OnsetEnvelope, other: &onset::OnsetEnvelope, max_
 pub fn run(paths: &[String], same_song: bool) {
     let analyzers: Vec<Box<dyn Analyzer>> = vec![
         Box::new(Rbxport(AnalysisPreset::Rekordbox)),
-        Box::new(Openbox(AnalysisPreset::Rekordbox)),
-        Box::new(Rbxport(AnalysisPreset::Rbxport)),
-        Box::new(Openbox(AnalysisPreset::Rbxport)),
+        Box::new(Openbox { preset: AnalysisPreset::Rekordbox, neural: false }),
+        Box::new(Openbox { preset: AnalysisPreset::Rekordbox, neural: true }),
     ];
     let mut done = Vec::new();
     for path in paths.iter().map(PathBuf::from) {
@@ -93,11 +92,24 @@ pub fn run(paths: &[String], same_song: bool) {
             );
             grids.push((a.name(), prediction));
         }
-        let report = ob_analysis::analyse(samples, sr, AnalysisPreset::Rekordbox.options()).report.phase;
+        let report = ob_analysis::analyse(samples, sr, &ob_analysis::Options::preset(AnalysisPreset::Rekordbox)).report.phase;
+        let round = |a: [f64; 4]| a.map(|v| (v * 100.0).round() / 100.0);
         println!(
-            "  openbox phase: judge {:?}, kick ratio {:.2}, structure on/off {:.2}/{:.2}, moved {}, bar scores {:?}, margin {:.2}",
-            report.judge, report.kick_ratio, report.structure_on, report.structure_off, report.moved_half_beat, report.bar_scores.map(|v| (v * 100.0).round() / 100.0), report.bar_margin
+            "  openbox phase: judge {:?}, kick ratio {:.2}, neural ratio {:.2}, structure on/off {:.2}/{:.2}, moved {}, bar scores {:?}, neural bar {:?}, margin {:.2}{}",
+            report.judge,
+            report.kick_ratio,
+            report.neural_ratio.unwrap_or(f64::NAN),
+            report.structure_on,
+            report.structure_off,
+            report.moved_half_beat,
+            round(report.bar_scores),
+            report.neural_bar.map(round),
+            report.bar_margin,
+            if report.half_beat_conflict { "  HALF-BEAT CONFLICT" } else { "" }
         );
+        if report.bar_conflict() {
+            println!("  BEAT-1 CONFLICT: structure says position {:?}, neural says {:?}", report.structure_choice, report.neural_choice);
+        }
         done.push(Analysed { path, kicks, grids });
     }
     if same_song && done.len() > 1 {

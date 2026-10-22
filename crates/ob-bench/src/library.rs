@@ -210,7 +210,7 @@ pub fn run(limit: Option<usize>, jobs: usize, filter: Option<&str>) {
     }
     println!("{} tracks to analyse ({missing} files missing, {no_grid} without a rekordbox grid)", queue.len());
 
-    let analyzers: Vec<Box<dyn Analyzer>> = vec![Box::new(Rbxport(AnalysisPreset::Rekordbox)), Box::new(Openbox(AnalysisPreset::Rekordbox))];
+    let analyzers: Vec<Box<dyn Analyzer>> = vec![Box::new(Rbxport(AnalysisPreset::Rekordbox)), Box::new(Openbox { preset: AnalysisPreset::Rekordbox, neural: false }), Box::new(Openbox { preset: AnalysisPreset::Rekordbox, neural: true })];
     let next = AtomicUsize::new(0);
     let records = Mutex::new(Vec::new());
     let started = Instant::now();
@@ -292,13 +292,13 @@ fn summarize(records: &[Record], secs: f64, jobs: usize) {
     };
     println!("\nhow each grid sits on the music (same detectors for all):");
     describe("rekordbox", &records.iter().map(|r| r.rekordbox_fit).collect::<Vec<_>>());
-    for name in ["rbxport-normal", "openbox-normal"] {
+    for name in ["rbxport-normal", "openbox-dsp-normal", "openbox-normal"] {
         let fits: Vec<Fit> = records.iter().flat_map(|r| r.analyzers.iter().filter(|a| a.analyzer == name).map(|a| a.fit)).collect();
         describe(name, &fits);
     }
 
     println!("\nagreement with rekordbox's grid:");
-    for name in ["rbxport-normal", "openbox-normal"] {
+    for name in ["rbxport-normal", "openbox-dsp-normal", "openbox-normal"] {
         let mine: Vec<&Versus> = records.iter().flat_map(|r| r.analyzers.iter().filter(|a| a.analyzer == name)).collect();
         let count = |rel: &str| mine.iter().filter(|v| v.relation == rel).count();
         let same_bar = mine.iter().filter(|v| v.relation == "same" && v.bar_offset == 0).count();
@@ -319,7 +319,7 @@ fn summarize(records: &[Record], secs: f64, jobs: usize) {
     // Where an analyzer and rekordbox put the grid on opposite halves of the
     // beat, which grid does the kick band side with?
     println!("\noff-beat disagreements, judged by the kick band:");
-    for name in ["rbxport-normal", "openbox-normal"] {
+    for name in ["rbxport-normal", "openbox-dsp-normal", "openbox-normal"] {
         let (mut ours, mut theirs) = (0, 0);
         for r in records {
             for v in r.analyzers.iter().filter(|v| v.analyzer == name && v.relation == "off-beat") {

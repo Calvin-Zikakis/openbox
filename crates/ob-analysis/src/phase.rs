@@ -19,7 +19,14 @@
 //! 2. **Which beat is 1.** Each beat's score is its own structural score
 //!    plus half of each neighbouring half beat's, so a change that straddles
 //!    the downbeat still votes for the downbeat.
+//!
+//! When the neural model is available it is a third judge, and the strongest:
+//! on ob-bench's 40 synthetic tracks its activations put the true grid on the
+//! beat 40 times and its downbeat on the true bar position 40 times
+//! (research note 004). It settles the half beat whenever it is decisive,
+//! and its downbeat evidence is blended with the structural scores.
 
+use ob_ml::Excerpt;
 use rbl_analysis::downbeat::{self, BANDS};
 use rbl_analysis::onset::OnsetEnvelope;
 use rbl_analysis::tempo::{self, TempoResult};
@@ -28,9 +35,18 @@ use rbl_analysis::tempo::{self, TempoResult};
 /// kick band alone decides the half-beat question (and its inverse below).
 pub const KICK_DECISIVE: f64 = 2.0;
 
+/// Neural beat activation on beats over midpoints, beyond which the neural
+/// judge alone decides the half beat (and its inverse below).
+pub const NEURAL_DECISIVE: f64 = 2.0;
+
+/// Weight of the neural downbeat evidence against the structural scores when
+/// choosing beat 1, both normalised to sum to one.
+pub const NEURAL_BAR_WEIGHT: f64 = 0.6;
+
 /// Who settled the half-beat question.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Judge {
+    Neural,
     Kick,
     Structure,
     /// No usable evidence either way: the fitted grid is kept.
@@ -56,6 +72,75 @@ pub struct PhaseReport {
     pub bar_margin: f64,
     /// Whether the arrangement changes enough to say anything about bars.
     pub structured: bool,
+    /// Neural beat activation on the fitted grid's beats over its midpoints.
+    pub neural_ratio: Option<f64>,
+    /// Mean neural downbeat activation on the final grid's four bar
+    /// positions, counted from its first beat.
+    pub neural_bar: Option<[f64; 4]>,
+    /// The kick band and the neural model were both decisive, and disagreed.
+    pub half_beat_conflict: bool,
+    /// Beat 1 by structure alone and by the neural model alone, counted from
+    /// the final grid's first beat, when each has evidence.
+    pub structure_choice: Option<usize>,
+    pub neural_choice: Option<usize>,
+}
+
+impl PhaseReport {
+    /// Structure and the neural model put beat 1 on different beats.
+    pub fn bar_conflict(&self) -> bool {
+        matches!((self.structure_choice, self.neural_choice), (Some(s), Some(n)) if s != n)
+    }
+}
+
+fn argmax(scores: &[f64; 4]) -> usize {
+    (0..4).max_by(|a, b| scores[*a].total_cmp(&scores[*b])).unwrap_or(0)
+}
+
+/// What the neural model says about a grid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NeuralEvidence {
+    pub beat_ratio: f64,
+    pub downbeat: [f64; 4],
+    /// Beats inside the excerpts the model saw.
+    pub beats_seen: usize,
+}
+
+/// Seconds at each edge of an excerpt not used as evidence.
+const EXCERPT_MARGIN: f64 = 1.0;
+
+/// The neural evidence for a grid, from the beats the excerpts cover; `None`
+/// when they cover too few beats to say anything.
+pub fn neural_evidence(excerpts: &[Excerpt], beats: &[f64]) -> Option<NeuralEvidence> {
+    let (mut on, mut off) = (0.0_f64, 0.0_f64);
+    let mut bar = [0.0_f64; 4];
+    let mut counts = [0_usize; 4];
+    let mut seen = 0;
+    for (i, pair) in beats.windows(2).enumerate() {
+        let Some(excerpt) = excerpts.iter().find(|e| e.covers(pair[0], EXCERPT_MARGIN) && e.covers(pair[1], EXCERPT_MARGIN)) else { continue };
+        let period = pair[1] - pair[0];
+        // A frame is 20 ms; never look closer than a frame either side.
+        let reach = (period / 8.0).max(0.021);
+        on += f64::from(excerpt.beat_near(pair[0], reach));
+        off += f64::from(excerpt.beat_near(pair[0] + period / 2.0, reach));
+        bar[i % 4] += f64::from(excerpt.downbeat_near(pair[0], reach));
+        counts[i % 4] += 1;
+        seen += 1;
+    }
+    if seen < 16 {
+        return None;
+    }
+    for (b, n) in bar.iter_mut().zip(counts) {
+        if n > 0 {
+            *b /= n as f64;
+        }
+    }
+    let beat_ratio = if off > 0.0 { on / off } else { f64::INFINITY };
+    Some(NeuralEvidence { beat_ratio, downbeat: bar, beats_seen: seen })
+}
+
+fn normalised(scores: [f64; 4]) -> Option<[f64; 4]> {
+    let total: f64 = scores.iter().sum();
+    (total > 0.0).then(|| scores.map(|s| s / total))
 }
 
 /// Unnumbered beat times of a grid, in seconds.
@@ -119,13 +204,25 @@ fn structure(frames: &[[f64; BANDS]], sample_rate: u32, beats: &[f64]) -> (Vec<f
 
 /// Decides the grid's half beat (moving its segments if they are on the
 /// off-beat) and its downbeat. Returns the downbeat's time.
-pub fn resolve(tempo: &mut TempoResult, frames: &[[f64; BANDS]], kicks: Option<&OnsetEnvelope>, sample_rate: u32) -> (f64, PhaseReport) {
+pub fn resolve(
+    tempo: &mut TempoResult,
+    frames: &[[f64; BANDS]],
+    kicks: Option<&OnsetEnvelope>,
+    excerpts: Option<&[Excerpt]>,
+    sample_rate: u32,
+) -> (f64, PhaseReport) {
     let beats = beat_secs(&tempo.segments);
     let ratio = kicks.map_or(1.0, |k| kick_ratio(k, &beats));
+    let neural = excerpts.and_then(|e| neural_evidence(e, &beats));
     let (scores, structured) = structure(frames, sample_rate, &beats);
     let on: f64 = scores.iter().step_by(2).sum();
     let off: f64 = scores.iter().skip(1).step_by(2).sum();
-    let (moved, judge) = if ratio >= KICK_DECISIVE {
+    let kick_decisive = ratio >= KICK_DECISIVE || ratio <= 1.0 / KICK_DECISIVE;
+    let neural_says = neural.map(|n| n.beat_ratio).filter(|r| *r >= NEURAL_DECISIVE || *r <= 1.0 / NEURAL_DECISIVE);
+    let half_beat_conflict = kick_decisive && neural_says.is_some_and(|r| (r >= 1.0) != (ratio >= 1.0));
+    let (moved, judge) = if let Some(r) = neural_says {
+        (r < 1.0, Judge::Neural)
+    } else if ratio >= KICK_DECISIVE {
         (false, Judge::Kick)
     } else if ratio <= 1.0 / KICK_DECISIVE {
         (true, Judge::Kick)
@@ -148,16 +245,27 @@ pub fn resolve(tempo: &mut TempoResult, frames: &[[f64; BANDS]], kicks: Option<&
         _ => beat_secs(&tempo.segments),
     };
     let (scores, bar_structured) = structure(frames, sample_rate, &own);
-    let mut bar_scores = [0.0_f64; 4];
-    for (p, score) in bar_scores.iter_mut().enumerate() {
+    let mut structure_bar = [0.0_f64; 4];
+    for (p, score) in structure_bar.iter_mut().enumerate() {
         let at = 2 * p;
         *score = scores[at] + f64::midpoint(scores[(at + 7) % 8], scores[at + 1]);
     }
+    let neural_bar = excerpts.and_then(|e| neural_evidence(e, &own)).map(|n| n.downbeat);
+    // Both judges as shares of their own total, blended toward the neural
+    // model; either alone when the other has nothing to say.
+    let structural = if bar_structured { normalised(structure_bar) } else { None };
+    let bar_scores = match (structural, neural_bar.and_then(normalised)) {
+        (Some(s), Some(n)) => std::array::from_fn(|p| (1.0 - NEURAL_BAR_WEIGHT) * s[p] + NEURAL_BAR_WEIGHT * n[p]),
+        (Some(s), None) => s,
+        (None, Some(n)) => n,
+        (None, None) => [0.25; 4],
+    };
+    let has_evidence = structural.is_some() || neural_bar.is_some();
     let mut ranked: Vec<usize> = (0..4).collect();
     ranked.sort_by(|a, b| bar_scores[*b].total_cmp(&bar_scores[*a]));
-    let bar = if bar_structured { ranked[0] } else { 0 };
+    let bar = if has_evidence { ranked[0] } else { 0 };
     let second = bar_scores[ranked[1]];
-    let bar_margin = if second > 0.0 { bar_scores[ranked[0]] / second } else if bar_structured { f64::INFINITY } else { 1.0 };
+    let bar_margin = if second > 0.0 { bar_scores[ranked[0]] / second } else if has_evidence { f64::INFINITY } else { 1.0 };
     let downbeat_secs = own.get(bar).or_else(|| own.first()).copied().unwrap_or(0.0);
     let report = PhaseReport {
         kick_ratio: ratio,
@@ -169,6 +277,11 @@ pub fn resolve(tempo: &mut TempoResult, frames: &[[f64; BANDS]], kicks: Option<&
         bar,
         bar_margin,
         structured: structured || bar_structured,
+        neural_ratio: neural.map(|n| n.beat_ratio),
+        neural_bar,
+        half_beat_conflict,
+        structure_choice: structural.map(|s| argmax(&s)),
+        neural_choice: neural_bar.filter(|n| n.iter().sum::<f64>() > 0.0).map(|n| argmax(&n)),
     };
     (downbeat_secs, report)
 }

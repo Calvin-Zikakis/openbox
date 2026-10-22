@@ -6,20 +6,25 @@ makes its own decisions about where the grid sits, and returns rbxport's `Analys
 type, so ANLZ writing, `master.db` and USB export take it unchanged.
 
 ```rust
-let result = ob_analysis::analyse(&mono_samples, sample_rate, rbl_analysis::AnalysisPreset::Rbxport.options());
+let options = ob_analysis::Options::preset(rbl_analysis::AnalysisPreset::Rekordbox);
+let result = ob_analysis::analyse(&mono_samples, sample_rate, &options);
 let analysis = result.analysis; // rbl_analysis::Analysis
-let report = result.report;     // the evidence behind the grid
+let report = result.report;     // the evidence behind the grid, and its flags
 ```
+
+`Options::preset` uses the neural judge when its models are installed (see
+[`ob-ml`](../ob-ml/README.md)); `.without_neural()` turns it off.
 
 ## What differs from rbxport
 
 | Stage | rbxport | openbox |
 | --- | --- | --- |
-| On the beat or off it | the half-beat position where the arrangement changes most | the kick band decides when decisive (at least 2x more kick onset energy on one side); structure decides otherwise, by total change on beats against between them |
-| Which beat is 1 | the same vote | each beat's structure score plus half of each neighbouring half beat's, so a change straddling the downbeat still votes for it |
+| On the beat or off it | the half-beat position where the arrangement changes most | the neural model decides when decisive (a ratio of at least 2), then the kick band when decisive, then structure (total change on beats against between them) |
+| Which beat is 1 | the same vote | structure, with each beat's score including half of each neighbouring half beat's, blended 0.4 / 0.6 with the neural downbeat. Flagged when they disagree |
 
-See [`src/phase.rs`](src/phase.rs) and the research note
-[002](../../docs/openbox/research/002-half-beat-judge.md).
+See [`src/phase.rs`](src/phase.rs) and research notes
+[002](../../docs/openbox/research/002-half-beat-judge.md) and
+[004](../../docs/openbox/research/004-neural-judge.md).
 
 ## Checks
 

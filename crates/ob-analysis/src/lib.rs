@@ -15,7 +15,66 @@
 
 pub mod phase;
 
-use rbl_analysis::{attack, downbeat, key, onset, tempo, waveform, Analysis, AnalysisOptions};
+use rbl_analysis::{attack, downbeat, key, onset, tempo, waveform, Analysis, AnalysisOptions, AnalysisPreset};
+
+/// Everything the analyzer is tuned by.
+#[derive(Debug, Clone, Copy)]
+pub struct Options {
+    /// rbxport's stage options.
+    pub analysis: AnalysisOptions,
+    /// The neural judge's model, or `None` to decide on DSP evidence alone.
+    pub neural: Option<ob_ml::Size>,
+}
+
+impl Options {
+    /// One of rbxport's presets, with the full neural model when it is
+    /// installed.
+    pub fn preset(preset: AnalysisPreset) -> Self {
+        let neural = ob_ml::available(ob_ml::Size::Full).then_some(ob_ml::Size::Full);
+        Self { analysis: preset.options(), neural }
+    }
+
+    #[must_use]
+    pub fn without_neural(self) -> Self {
+        Self { neural: None, ..self }
+    }
+}
+
+/// Seconds of audio in each neural excerpt. The model's cost grows faster
+/// than its input: 20 s takes 0.39 s on an M3 Pro, 25 s 0.52 s, but 30 s
+/// 1.26 s (research note 004), so several short excerpts beat a few long ones.
+const EXCERPT_SECS: f64 = 20.0;
+
+/// Excerpts per track, one per equal part of it.
+const EXCERPTS: usize = 4;
+
+/// Where the neural model listens: the whole of a short track; otherwise the
+/// loudest 20 seconds of each quarter, which in dance music is where the
+/// drums play.
+fn excerpt_windows(samples: &[f32], sample_rate: u32) -> Vec<(f64, f64)> {
+    let rate = sample_rate as usize;
+    if rate == 0 {
+        return Vec::new();
+    }
+    let seconds = samples.len() / rate;
+    if seconds as f64 <= EXCERPT_SECS * EXCERPTS as f64 * 1.25 {
+        return vec![(0.0, seconds as f64 + 1.0)];
+    }
+    let energy: Vec<f64> = samples.chunks(rate).map(|c| c.iter().map(|s| f64::from(*s) * f64::from(*s)).sum::<f64>()).collect();
+    let mut prefix = vec![0.0; energy.len() + 1];
+    for (i, e) in energy.iter().enumerate() {
+        prefix[i + 1] = prefix[i] + e;
+    }
+    let length = EXCERPT_SECS as usize;
+    let part = seconds / EXCERPTS;
+    (0..EXCERPTS)
+        .filter_map(|k| {
+            let (from, to) = (k * part, ((k + 1) * part).min(energy.len()).saturating_sub(length));
+            (from..=to.max(from)).filter(|s| s + length <= energy.len()).max_by(|a, b| (prefix[a + length] - prefix[*a]).total_cmp(&(prefix[b + length] - prefix[*b])))
+        })
+        .map(|start| (start as f64, EXCERPT_SECS))
+        .collect()
+}
 
 /// What the analyzer saw, beside what it decided.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,10 +89,14 @@ pub struct ObAnalysis {
 }
 
 /// Runs the full analysis.
-#[allow(clippy::needless_pass_by_value, reason = "a Copy options struct")]
-pub fn analyse(samples: &[f32], sample_rate: u32, options: AnalysisOptions) -> ObAnalysis {
-    // The same independent passes rbxport runs, each on its own thread.
-    let (onsets, kicks, attacks, frames, waveform, level, found_key) = std::thread::scope(|scope| {
+#[allow(clippy::too_many_lines, reason = "one orchestration of independent stages")]
+pub fn analyse(samples: &[f32], sample_rate: u32, options: &Options) -> ObAnalysis {
+    let neural_size = options.neural;
+    let options = options.analysis;
+    // The same independent passes rbxport runs, each on its own thread, and
+    // the neural model beside them.
+    let (onsets, kicks, attacks, frames, waveform, level, found_key, excerpts) = std::thread::scope(|scope| {
+        let excerpts = scope.spawn(|| neural_size.and_then(|size| ob_ml::excerpts(samples, sample_rate, size, &excerpt_windows(samples, sample_rate))));
         let onsets = scope.spawn(|| onset::onset_envelope(samples, sample_rate));
         let kicks = scope.spawn(|| onset::onset_envelope_band(samples, sample_rate, onset::Band::LOW));
         let attacks = scope.spawn(|| match options.tempo.placement {
@@ -58,11 +121,12 @@ pub fn analyse(samples: &[f32], sample_rate: u32, options: AnalysisOptions) -> O
             waveform.join().unwrap_or_else(|_| waveform::compute(&[], sample_rate)),
             level.join().unwrap_or((0.0, 0.0)),
             key.join().ok().flatten(),
+            excerpts.join().ok().flatten(),
         )
     });
 
     let mut tempo = tempo::detect_tempo_with(&onsets, kicks.as_ref(), attacks.as_ref(), options.tempo);
-    let (downbeat_secs, phase) = phase::resolve(&mut tempo, &frames, kicks.as_ref(), sample_rate);
+    let (downbeat_secs, phase) = phase::resolve(&mut tempo, &frames, kicks.as_ref(), excerpts.as_deref(), sample_rate);
     tempo.beats = tempo::beats_of(&tempo.segments, rbl_analysis::phase_for(&tempo.segments, downbeat_secs));
     rbl_analysis::anchor_file_start(&mut tempo, samples, sample_rate, downbeat_secs);
 
