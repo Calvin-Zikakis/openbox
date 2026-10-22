@@ -6,6 +6,7 @@ library features. Everything specific to the fork lives in this folder. The rest
 
 | Document | What it holds |
 | --- | --- |
+| [HANDOFF.md](HANDOFF.md) | Handoff for coding agents: rules, environment, architecture, state, next tasks. |
 | [PLAN.md](PLAN.md) | Goals, phases, architecture of the fork, risks and open decisions. |
 | [LOG.md](LOG.md) | Dated progress log: what was done, what was measured, what is next. |
 | [decisions/](decisions/) | Decision records: one file per decision, with the evidence behind it. |

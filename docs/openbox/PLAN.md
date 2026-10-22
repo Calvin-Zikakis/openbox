@@ -12,8 +12,9 @@ rekordbox library and writes USB sticks that CDJs load. openbox adds two things:
 rbxport's README states its vision is "fewer features" and invites forks for anything
 beyond that. openbox is that fork.
 
-Status: Phase 0 under way. The fork is github.com/Calvin-Zikakis/openbox, created
-2026-10-21. Progress is recorded in [LOG.md](LOG.md).
+Status: Phase 0 under way. The fork is github.com/Calvin-Zikakis/rbxport-beat-analysis
+(created 2026-10-21 as Calvin-Zikakis/openbox, renamed 2026-10-22). Progress is
+recorded in [LOG.md](LOG.md).
 
 Contents
 

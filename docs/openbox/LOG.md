@@ -2,6 +2,106 @@
 
 Newest first. Each entry says what was done, what was measured, and what comes next.
 
+## 2026-10-22 (repository renamed)
+
+- The GitHub repository is now Calvin-Zikakis/rbxport-beat-analysis, and the local
+  checkout moved to `~/repositories/rbxport-beat-analysis`. `origin` points to the new
+  URL. The project, crates (`ob-*`) and app mode keep the name openbox.
+- The rustup directory override is keyed by path, so it was set again for the new
+  folder (`rustup override set 1.99.0-aarch64-apple-darwin`).
+
+**Library comparison (in progress)**
+
+- The owner's rekordbox library on this Mac is now usable for `ob-bench library`: dead
+  entries were removed and more tracks were imported from USB, keeping rekordbox's grids.
+- A 20-track sample (before the cleanup) put rekordbox's grids about 1.1 ms late on the
+  kick attack (median); openbox with the neural judge was about 0.5 ms late, rbxport
+  about 0. Where openbox and rekordbox disagreed by half a beat (3 tracks), the kick band
+  sided with openbox each time. Too small to conclude anything.
+- A full run on 464 tracks (0 missing, 39 without a rekordbox grid) was started with
+  `nohup target/release/ob-bench library --jobs 4`, writing
+  `target/ob-library/summary-full.txt` (no titles) and `target/ob-library/results.jsonl`
+  (private, names tracks). It must run outside the VS Code terminal sandbox, which hides
+- The full run finished: 464 tracks in 748 s. Results are in
+  [research note 005](research/005-placement.md). In short: where openbox and rekordbox
+  differ by 5 to 25 ms on the same beat (105 tracks), 64 % of openbox's beats sit within
+  5 ms of a kick attack against 34 % of rekordbox's. The neural judge cuts off-beat
+  disagreements with rekordbox from 43 (rbxport) to 15. Beat 1 agrees with rekordbox on
+  83 %, about as often as rbxport. **23 tracks (5 %) have a tempo ratio error** (half,
+  two thirds, four fifths) from the shared tempo stage, now the largest failure class.
+  `cargo clippy -p ob-ml -p ob-analysis -p ob-bench --release --all-targets` is clean.
+
+**Placement stage measured**
+
+- [Research note 005](research/005-placement.md). On the synthetic suite the median
+  signed error fell from 0.97 ms to 0.07 ms, and "max<=2" rose from 34 to 35 of 40.
+  Beat 1 (37) and octave (37) are unchanged.
+- Fixed a regression the first run showed: on tracks that start on a beat at 0 s, the
+  stage moved `anchor_file_start`'s one-beat opening segment about 0.9 ms late. It now
+  leaves that segment where it is.
+- `ob-bench files` now prints the placement measurement. Not yet run on real masters.
+
+## 2026-10-21 (paused here)
+
+Where things stand when work paused. Everything below this entry is committed and pushed
+to `origin/main` (last commit `09c8436b`). The work in this entry is **not committed**.
+
+**App integration (uncommitted, built and tested)**
+
+- A third analysis mode, "openbox (Precise Grid)", in the Analysis Setting dialog and in
+  Preferences > Track Analysis, and the fork's default mode. It runs `ob-analysis` on
+  rbxport's Normal (constant-grid) options. The result goes through rbxport's own ANLZ,
+  `master.db` and USB-export writers unchanged.
+- Rust: `src-tauri/src/analysis.rs` maps mode `"openbox"` to `Engine::Openbox`. The
+  engine travels in `AnalysisSettings` as a field the frontend never sends, so
+  `analyse_and_save`'s signature and its upstream tests are unchanged. `analyse_file`
+  remains as a test-only wrapper around `analyse_file_with`. A new test,
+  `the_openbox_engine_grids_the_fixture_track_as_rbxport_does`, was added.
+- Frontend: `AnalysisMode` gains `"openbox"` in `src/lib/preferences.ts`, along with
+  validation, the default, the remembered dialog choice, the IPC type and the two
+  selectors.
+- Checks run: `tsc --noEmit` passes, and `cargo clippy -p rbxport --all-targets` is clean.
+  The vitest run of the affected folders shows 15 failures in 5 files, but **the same 15
+  fail on a clean tree**. They are `localStorage` and React `act` tests, consistent with
+  Node 26 on this machine, while the project pins Node 24.
+- `RB_LITE_TEST=1 cargo test -p rbxport --lib analysis::` passes: 8 of 8, including the
+  new openbox engine test.
+- The models are found through `OPENBOX_MODELS`, `./models`, or the workspace's
+  `models/` at build time. That works for a development build on this machine. A
+  packaged app will need to ship or download them.
+
+**Placement refinement (uncommitted, wired in, not measured)**
+
+- `crates/ob-analysis/src/placement.rs` measures each beat's transient onset at
+  sub-millisecond resolution, takes the median offset, and moves the whole grid by it
+  when at least 16 beats agree within 1 ms (move capped at 4 ms). It moves segment
+  boundaries with the beats, and keeps beat 1 by time.
+- It is wired in: `ob-analysis::analyse` calls `placement::refine` after
+  `anchor_file_start`, and `Report.placement` carries its measurement.
+  `cargo clippy -p ob-analysis -p ob-bench --release --all-targets` is clean.
+- **Not measured yet.** Run `ob-bench eval`. The target is the synthetic suite's 1 ms
+  early bias going to about 0.2 ms, with no change in downbeats.
+
+**Needs the owner**
+
+- Where beat 1 is on "ROUZ - The One" and "ROUZ & Wyllie - Perceive" (research note
+  004). Both are flagged as conflicts between structure and the neural model.
+- The drive or rekordbox USB stick holding the DJ library, for `ob-bench library`.
+- Whether to commit and push the uncommitted work above as it stands.
+
+**To resume**
+
+```sh
+export CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+git status                                             # the uncommitted files listed above
+RB_LITE_TEST=1 cargo test -p rbxport --lib analysis::  # confirm the app tests
+cargo build --release -p ob-bench && target/release/ob-bench eval --quiet --jobs 3
+```
+
+Then measure the placement stage, tune the CoreML provider settings, and make one
+constant grid the default with tempo changes flagged for review. The full handoff for
+another agent is [HANDOFF.md](HANDOFF.md).
+
 ## 2026-10-21 (evening)
 
 **Neural judge**
