@@ -1,3 +1,7 @@
+> **openbox** is a fork of rbxport that adds a more precise beat-grid analyzer and
+> Lexicon-class library features. Its plan, progress log and research live in
+> [docs/openbox](docs/openbox/README.md). Everything below is rbxport's own README.
+
 <p align="center">
   <a href="https://rbxport.com">
     <img src="docs/assets/brand/combined/rbxport-logo-color-white.png" alt="rbxport" width="360">
