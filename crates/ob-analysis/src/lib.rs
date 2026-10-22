@@ -14,6 +14,7 @@
 )]
 
 pub mod phase;
+pub mod placement;
 
 use rbl_analysis::{attack, downbeat, key, onset, tempo, waveform, Analysis, AnalysisOptions, AnalysisPreset};
 
@@ -32,6 +33,12 @@ impl Options {
     pub fn preset(preset: AnalysisPreset) -> Self {
         let neural = ob_ml::available(ob_ml::Size::Full).then_some(ob_ml::Size::Full);
         Self { analysis: preset.options(), neural }
+    }
+
+    /// rbxport's stage options as the caller tuned them, with the full neural
+    /// model when it is installed.
+    pub fn with(analysis: AnalysisOptions) -> Self {
+        Self { analysis, ..Self::preset(AnalysisPreset::Rekordbox) }
     }
 
     #[must_use]
@@ -80,6 +87,7 @@ fn excerpt_windows(samples: &[f32], sample_rate: u32) -> Vec<(f64, f64)> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Report {
     pub phase: phase::PhaseReport,
+    pub placement: placement::PlacementReport,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +137,7 @@ pub fn analyse(samples: &[f32], sample_rate: u32, options: &Options) -> ObAnalys
     let (downbeat_secs, phase) = phase::resolve(&mut tempo, &frames, kicks.as_ref(), excerpts.as_deref(), sample_rate);
     tempo.beats = tempo::beats_of(&tempo.segments, rbl_analysis::phase_for(&tempo.segments, downbeat_secs));
     rbl_analysis::anchor_file_start(&mut tempo, samples, sample_rate, downbeat_secs);
+    let placement = placement::refine(&mut tempo, samples, sample_rate);
 
     let key = found_key.unwrap_or_else(|| {
         let key_grid = key::KeyGrid {
@@ -140,7 +149,7 @@ pub fn analyse(samples: &[f32], sample_rate: u32, options: &Options) -> ObAnalys
     let (peak, rms) = level;
     ObAnalysis {
         analysis: Analysis { tempo, key: key.map(|report| report.key), waveform, peak, rms },
-        report: Report { phase },
+        report: Report { phase, placement },
     }
 }
 

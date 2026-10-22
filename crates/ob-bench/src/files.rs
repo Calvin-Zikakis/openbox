@@ -92,7 +92,8 @@ pub fn run(paths: &[String], same_song: bool) {
             );
             grids.push((a.name(), prediction));
         }
-        let report = ob_analysis::analyse(samples, sr, &ob_analysis::Options::preset(AnalysisPreset::Rekordbox)).report.phase;
+        let full = ob_analysis::analyse(samples, sr, &ob_analysis::Options::preset(AnalysisPreset::Rekordbox)).report;
+        let report = full.phase;
         let round = |a: [f64; 4]| a.map(|v| (v * 100.0).round() / 100.0);
         println!(
             "  openbox phase: judge {:?}, kick ratio {:.2}, neural ratio {:.2}, structure on/off {:.2}/{:.2}, moved {}, bar scores {:?}, neural bar {:?}, margin {:.2}{}",
@@ -110,6 +111,14 @@ pub fn run(paths: &[String], same_song: bool) {
         if report.bar_conflict() {
             println!("  BEAT-1 CONFLICT: structure says position {:?}, neural says {:?}", report.structure_choice, report.neural_choice);
         }
+        let p = full.placement;
+        println!(
+            "  openbox placement: measured {:+.3} ms over {} beats, spread {:.3} ms, {}",
+            p.measured_ms,
+            p.beats_used,
+            p.spread_ms,
+            if p.applied { format!("moved {:+.3} ms", p.shift_ms) } else { "not moved".to_owned() }
+        );
         done.push(Analysed { path, kicks, grids });
     }
     if same_song && done.len() > 1 {
