@@ -308,19 +308,30 @@ fn neural_speed(args: &Args) {
     let Some(path) = args.positional.first() else { return };
     let Ok(audio) = rbl_audio::decode_mono(std::path::Path::new(path), None) else { return };
     let sr = audio.sample_rate as usize;
+    println!("backend: {:?}", ob_ml::backend());
     for size in [ob_ml::Size::Full, ob_ml::Size::Small] {
         // The first call loads the model.
         let t = Instant::now();
         let _ = ob_ml::activations(&audio.samples[..sr * 5], audio.sample_rate, size);
         println!("{size:?}: load + 5 s: {:.0} ms", t.elapsed().as_secs_f64() * 1000.0);
-        for secs in [8, 10, 12, 15, 20, 25, 30] {
+        for secs in [10, 20, 25, 30] {
             let n = (sr * secs).min(audio.samples.len());
             let t = Instant::now();
             let _ = ob_ml::activations(&audio.samples[..n], audio.sample_rate, size);
             println!("  {secs:>4} s of audio: {:>6.0} ms", t.elapsed().as_secs_f64() * 1000.0);
         }
         let t = Instant::now();
-        let _ = ob_ml::activations(&audio.samples, audio.sample_rate, size);
+        let whole = ob_ml::activations(&audio.samples, audio.sample_rate, size);
         println!("  whole track ({:.0} s): {:.0} ms", audio.duration_secs(), t.elapsed().as_secs_f64() * 1000.0);
+        // Compare with the CPU path, which a fresh thread runs from scratch.
+        if ob_ml::backend() == ob_ml::Backend::CoreMl {
+            let samples = audio.samples.clone();
+            let rate = audio.sample_rate;
+            let cpu = std::thread::spawn(move || ob_ml::cpu_activations(&samples, rate, size)).join().ok().flatten();
+            if let (Some(a), Some(b)) = (whole, cpu) {
+                let diff = a.beat.iter().zip(&b.beat).chain(a.downbeat.iter().zip(&b.downbeat)).map(|(x, y)| (x - y).abs()).fold(0.0_f32, f32::max);
+                println!("  largest probability difference from the CPU path: {diff:.4} over {} frames", a.beat.len());
+            }
+        }
     }
 }

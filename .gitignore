@@ -60,3 +60,4 @@ __pycache__/
 
 # openbox: neural models, fetched by scripts/openbox/fetch-models.sh
 /models/
+/vendor/onnxruntime/

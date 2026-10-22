@@ -24,9 +24,16 @@ Newest first. Each entry says what was done, what was measured, and what comes n
   note 004).
 - The drive or USB stick holding the DJ library, for `ob-bench library`.
 
+**GPU, first attempt**
+
+- CoreML through ONNX Runtime 1.24.2 (`scripts/openbox/fetch-onnxruntime.sh`, vendored,
+  git-ignored) works, with outputs within 0.013 of the CPU's. But it runs 2.4 times
+  *slower* with default provider settings, so it is opt-in
+  (`OPENBOX_NEURAL_BACKEND=coreml`). Tuning the provider options is a follow-up.
+
 **Next**
 
-1. GPU inference (ONNX Runtime with CoreML) for the neural judge.
+1. Tune the CoreML provider settings (MLProgram, compute units, static shapes, cache).
 2. The 1 ms placement bias.
 3. Make the openbox analyzer selectable in the app.
 4. Default to one constant grid, and flag possible tempo changes.

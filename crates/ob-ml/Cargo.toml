@@ -10,6 +10,15 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+default = ["coreml"]
+# Inference through ONNX Runtime's CoreML provider (GPU and Neural Engine)
+# when the runtime library fetched by scripts/openbox/fetch-onnxruntime.sh is
+# present; the pure-Rust CPU path otherwise.
+coreml = ["beat-this/ort", "dep:ort"]
+
 [dependencies]
 # MIT. Pure-Rust inference (rten) by default; no decoder, no CLI.
 beat-this = { version = "=1.1.0", default-features = false }
+# The version beat-this's ONNX Runtime backend is built against; loaded at run time.
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["std", "load-dynamic", "coreml", "api-24"] }

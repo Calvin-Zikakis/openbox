@@ -91,6 +91,23 @@ the phrase. The blend sides with the neural model. **Unverified:** it needs grou
 Both conflicting tracks are the library owner's own productions, so they can say where
 beat 1 is.
 
+## GPU: CoreML through ONNX Runtime
+
+`ob-ml` can also run inference through Microsoft's ONNX Runtime 1.24.2 build for Apple
+silicon (`scripts/openbox/fetch-onnxruntime.sh`) with its CoreML provider. With the
+provider's default settings, as the `beat-this` crate sets them:
+
+| Model, input | CPU (`rten`) | CoreML |
+| --- | --- | --- |
+| Full, whole 378 s track | 8.4 s | 20.1 s |
+| Full, 20 s | 0.39 s | slower at every length tried |
+
+The outputs agree to within 0.013 in probability over 18,901 frames, so the path is
+correct, only slow. ONNX Runtime's default CoreML settings commonly send unsupported
+operators back to the CPU and recompile for each new input shape. CoreML therefore stays
+opt-in (`OPENBOX_NEURAL_BACKEND=coreml`) until the provider's options (MLProgram model
+format, compute units, static shapes, compiled-model cache) have been tried.
+
 ## Next
 
 - Ground truth for beat 1 on real tracks (owner verification, then the DJ library).

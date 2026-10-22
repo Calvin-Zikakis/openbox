@@ -19,5 +19,10 @@ let excerpts = ob_ml::excerpts(&mono, sample_rate, ob_ml::Size::Full, &windows);
 ```
 
 Each thread loads its own copy of a model on first use: the model needs `&mut` to run.
+
+Inference runs on the CPU by default. `OPENBOX_NEURAL_BACKEND=coreml` runs it through
+ONNX Runtime's CoreML provider instead, once `scripts/openbox/fetch-onnxruntime.sh` has
+fetched the runtime library. With default provider settings it is currently slower than
+the CPU.
 Timing and accuracy are in research note
 [004](../../docs/openbox/research/004-neural-judge.md).

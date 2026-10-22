@@ -12,6 +12,7 @@
 //! [`activations`] returns `None` and analysis runs on DSP evidence alone.
 
 #![allow(clippy::cast_precision_loss, reason = "frame and sample counts to seconds")]
+#![allow(clippy::doc_markdown, reason = "CoreML is a product name")]
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -143,9 +144,87 @@ pub fn excerpts(samples: &[f32], sample_rate: u32, size: Size, windows: &[(f64, 
     Some(out)
 }
 
+/// Where inference runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    /// Pure-Rust `rten`, on every CPU core.
+    Cpu,
+    /// ONNX Runtime with CoreML: the GPU and Neural Engine on Apple silicon.
+    CoreMl,
+}
+
+/// The backend inference uses: the CPU, unless `OPENBOX_NEURAL_BACKEND=coreml`
+/// and the CoreML runtime library is installed. With ONNX Runtime's default
+/// CoreML settings the model ran 2.4 times slower than on the CPU (research
+/// note 004), so CoreML stays opt-in until its settings are tuned.
+pub fn backend() -> Backend {
+    #[cfg(feature = "coreml")]
+    if std::env::var("OPENBOX_NEURAL_BACKEND").is_ok_and(|v| v.eq_ignore_ascii_case("coreml")) && coreml::ready() {
+        return Backend::CoreMl;
+    }
+    Backend::Cpu
+}
+
+#[cfg(feature = "coreml")]
+mod coreml {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, OnceLock};
+
+    use beat_this::{BeatThis, OrtRuntime, Runtime};
+
+    use super::{model_paths, models_dir, Size};
+
+    type Loaded = BeatThis<<OrtRuntime as Runtime>::Model>;
+
+    const DYLIB: &str = "vendor/onnxruntime/onnxruntime-osx-arm64-1.24.2/lib/libonnxruntime.1.24.2.dylib";
+
+    /// `OPENBOX_ORT_DYLIB`, else the vendored library under the current
+    /// directory or the workspace this crate was built in.
+    fn dylib() -> Option<PathBuf> {
+        if let Some(path) = std::env::var_os("OPENBOX_ORT_DYLIB") {
+            return Some(PathBuf::from(path));
+        }
+        [PathBuf::from(DYLIB), Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(DYLIB)].into_iter().find(|p| p.is_file())
+    }
+
+    /// Loads the runtime once; whether it is usable with CoreML.
+    pub fn ready() -> bool {
+        static READY: OnceLock<bool> = OnceLock::new();
+        *READY.get_or_init(|| {
+            let Some(path) = dylib() else { return false };
+            ort::init_from(&path).map(ort::environment::EnvironmentBuilder::commit).is_ok() && OrtRuntime::default().is_coreml_available()
+        })
+    }
+
+    // One session per model for the whole process: the GPU runs one
+    // inference at a time anyway, and compiling a model for CoreML is slow.
+    static MODELS: Mutex<Vec<(Size, Loaded)>> = Mutex::new(Vec::new());
+
+    pub fn logits(samples: &[f32], sample_rate: u32, size: Size) -> Option<(Vec<f32>, Vec<f32>)> {
+        let mut models = MODELS.lock().ok()?;
+        if !models.iter().any(|(s, _)| *s == size) {
+            let (mel, beat) = model_paths(&models_dir(), size);
+            models.push((size, BeatThis::new(&OrtRuntime::default(), &mel, &beat).ok()?));
+        }
+        let (_, model) = models.iter_mut().find(|(s, _)| *s == size)?;
+        let analysis = model.analyze_audio(samples, sample_rate).ok()?;
+        Some((analysis.beat_logits, analysis.downbeat_logits))
+    }
+}
+
 /// Beat and downbeat probabilities for mono audio at any sample rate, or
 /// `None` when the models are missing or inference fails.
 pub fn activations(samples: &[f32], sample_rate: u32, size: Size) -> Option<Activations> {
+    #[cfg(feature = "coreml")]
+    if backend() == Backend::CoreMl {
+        let (beat, downbeat) = coreml::logits(samples, sample_rate, size)?;
+        return Some(Activations { beat: beat.iter().map(|&x| sigmoid(x)).collect(), downbeat: downbeat.iter().map(|&x| sigmoid(x)).collect() });
+    }
+    cpu_activations(samples, sample_rate, size)
+}
+
+/// [`activations`] on the CPU path, whatever [`backend`] says.
+pub fn cpu_activations(samples: &[f32], sample_rate: u32, size: Size) -> Option<Activations> {
     LOADED.with(|loaded| {
         let mut loaded = loaded.borrow_mut();
         if !loaded.iter().any(|(s, _)| *s == size) {
