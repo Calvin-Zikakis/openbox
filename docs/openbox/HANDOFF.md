@@ -111,6 +111,9 @@ selection over tempo estimation.
    kick-band envelope, attack map, band frames, waveform, level, key. Neural excerpts
    run beside them: the loudest 20 s of each quarter of the track.
 2. `rbl_analysis::tempo::detect_tempo_with` fits the grid on kick attacks.
+   `octave::judge` then compares the tempo with the spacing of Beat This!'s beats and,
+   when it is a simple ratio that lands in 90 to 180 BPM with steady beats, refits at it
+   through `tempo::detect_tempo_at` (note 006).
 3. `phase::resolve` settles the half beat: the neural ratio decides when it is at least
    2 or at most 0.5; otherwise the kick band when its ratio is at least 2 or at most 0.5;
    otherwise structure, comparing total change on beats against between them. It then
@@ -192,12 +195,11 @@ Ask the owner before committing or pushing new work they have not reviewed. On
 2. **Commit the app mode and the placement stage**, once the owner approves. Use
    separate commits with descriptive messages.
 
-   **New, from note 005: fix tempo ratio errors.** 23 of 464 library tracks get half,
-   two-thirds or four-fifths of rekordbox's BPM from the shared tempo stage. Look at
-   them with `ob-bench library --filter` (local only), find which candidate tempos the
-   stage weighed, and see whether the neural beat activations or the kick ratio of each
-   candidate grid would choose rekordbox's. Measure on `ob-bench eval` (octave must not
-   fall) and on the library. Do this before task 5.
+   **Tempo ratio errors: first round done (note 006).** The neural tempo judge cut the
+   library's tempo disagreements with rekordbox from 27 to 15 of 464 tracks. About 11
+   ratio errors remain, half of them with unsteady neural beats. Next ideas: score each
+   candidate tempo's grid by its neural beat activation, and measure on other genres.
+   Re-run `ob-bench eval` (octave must not fall) and the library for any change.
 
 3. **One constant grid by default, with tempo changes flagged.** Add a flag to
    `ob_analysis::Report` when rbxport's tempo-change detection, run as evidence only,

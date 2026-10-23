@@ -2,6 +2,24 @@
 
 Newest first. Each entry says what was done, what was measured, and what comes next.
 
+## 2026-10-22 (tempo judge)
+
+- [Research note 006](research/006-tempo-judge.md). `ob-analysis::octave` compares the
+  spacing of Beat This!'s beats with the DSP tempo and refits the grid at a simple ratio
+  of it (through the new `rbl_analysis::tempo::detect_tempo_at` hook), but only when the
+  result lies between 90 and 180 BPM and the beats are steady (consistency 0.6). The first
+  version, with any ratio, fixed 11 library tracks and broke 12; Beat This! hears
+  half-time on fast drum and bass and dubstep, and halved a correct tempo every time.
+- On the 464-track library, tracks whose BPM differs from rekordbox's fell from 27 to 15,
+  and the final BPM agrees with rekordbox's on 454 of 464 (441 before). The synthetic
+  suite is unchanged from before the judge (octave 37, beat 1 37, pass 35).
+- `ob-bench library` now records the DSP tempo, the neural tempo and its consistency per
+  track, so rules can be replayed offline.
+- The placement stage moves the grid only when two thirds of beats agree within 1 ms of
+  the median (it was a median deviation of at most 1 ms, which passes two equal clusters).
+  It has three unit tests. On the library 6 tracks crossed the 5 ms boundary to or from
+  "same", 4 one way and 2 the other.
+
 ## 2026-10-22 (repository renamed)
 
 - The GitHub repository is now Calvin-Zikakis/rbxport-beat-analysis, and the local
@@ -22,6 +40,7 @@ Newest first. Each entry says what was done, what was measured, and what comes n
   `nohup target/release/ob-bench library --jobs 4`, writing
   `target/ob-library/summary-full.txt` (no titles) and `target/ob-library/results.jsonl`
   (private, names tracks). It must run outside the VS Code terminal sandbox, which hides
+  `~/Library/Pioneer`.
 - The full run finished: 464 tracks in 748 s. Results are in
   [research note 005](research/005-placement.md). In short: where openbox and rekordbox
   differ by 5 to 25 ms on the same beat (105 tracks), 64 % of openbox's beats sit within
