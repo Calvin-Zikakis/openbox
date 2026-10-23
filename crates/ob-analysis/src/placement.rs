@@ -27,6 +27,8 @@ pub struct PlacementReport {
     pub beats_used: usize,
     /// Median absolute deviation of the offsets, in ms.
     pub spread_ms: f64,
+    /// Share of the beats used whose offset is within `MAX_SPREAD_MS` of the median.
+    pub agreeing: f64,
     pub applied: bool,
 }
 
@@ -43,6 +45,10 @@ const THRESHOLD: f64 = 0.1;
 /// Fewest clear transients, and the widest spread, for a move to be trusted.
 const MIN_BEATS: usize = 16;
 const MAX_SPREAD_MS: f64 = 1.0;
+/// Share of the beats that must sit within `MAX_SPREAD_MS` of the median. A
+/// median absolute deviation alone passes two equal clusters (a flam, a clap
+/// layered on the kick), where the median is just one of them.
+const MIN_AGREEING: f64 = 2.0 / 3.0;
 /// Largest move the stage makes: past this the grid is wrong in a way a
 /// constant shift should not paper over.
 const MAX_SHIFT_MS: f64 = 4.0;
@@ -114,8 +120,9 @@ pub fn refine(tempo: &mut TempoResult, samples: &[f32], sample_rate: u32) -> Pla
     let mut deviations: Vec<f64> = offsets.iter().map(|o| (o - median).abs()).collect();
     deviations.sort_by(f64::total_cmp);
     let spread = deviations[deviations.len() / 2];
-    let applied = offsets.len() >= MIN_BEATS && spread <= MAX_SPREAD_MS && median.abs() <= MAX_SHIFT_MS;
-    let report = PlacementReport { shift_ms: if applied { median } else { 0.0 }, measured_ms: median, beats_used: offsets.len(), spread_ms: spread, applied };
+    let agreeing = deviations.iter().filter(|d| **d <= MAX_SPREAD_MS).count() as f64 / deviations.len() as f64;
+    let applied = offsets.len() >= MIN_BEATS && agreeing >= MIN_AGREEING && median.abs() <= MAX_SHIFT_MS;
+    let report = PlacementReport { shift_ms: if applied { median } else { 0.0 }, measured_ms: median, beats_used: offsets.len(), spread_ms: spread, agreeing, applied };
     if !applied || median == 0.0 {
         return report;
     }
@@ -143,4 +150,67 @@ pub fn refine(tempo: &mut TempoResult, samples: &[f32], sample_rate: u32) -> Pla
     let phase = downbeat.map_or(0, |d| rbl_analysis::phase_for(&tempo.segments, d + shift));
     tempo.beats = tempo::beats_of(&tempo.segments, phase);
     report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rbl_analysis::tempo::Segment;
+
+    const RATE: u32 = 44_100;
+    const PERIOD: f64 = 0.5;
+    const SECS: f64 = 30.0;
+
+    /// Silence with a decaying 3 kHz click starting at each of `at`.
+    fn clicks(at: impl Iterator<Item = f64>) -> Vec<f32> {
+        let rate = f64::from(RATE);
+        let mut samples = vec![0.0_f32; (SECS * rate) as usize];
+        for start in at {
+            let first = (start * rate).round() as usize;
+            for n in 0..(0.003 * rate) as usize {
+                let t = n as f64 / rate;
+                if let Some(s) = samples.get_mut(first + n) {
+                    *s = ((2.0 * std::f64::consts::PI * 3000.0 * t).sin() * (-t / 0.001).exp()) as f32;
+                }
+            }
+        }
+        samples
+    }
+
+    fn result(segments: Vec<Segment>) -> TempoResult {
+        let beats = tempo::beats_of(&segments, 0);
+        TempoResult { bpm: 120.0, confidence: 1.0, first_beat_secs: segments[0].start_secs(), segments, beats }
+    }
+
+    #[test]
+    fn a_grid_a_millisecond_early_moves_onto_the_clicks() {
+        let samples = clicks((1..58).map(|k| f64::from(k) * PERIOD + 0.001));
+        let mut tempo = result(vec![Segment { from_secs: 0.0, to_secs: SECS, period_secs: PERIOD, phase_secs: PERIOD }]);
+        let report = refine(&mut tempo, &samples, RATE);
+        assert!(report.applied, "{report:?}");
+        assert!((report.shift_ms - 1.0).abs() < 0.15, "{report:?}");
+        assert!((tempo.segments[0].phase_secs - PERIOD - 0.001).abs() < 0.000_15);
+    }
+
+    #[test]
+    fn the_beat_pinned_at_the_first_sample_stays_there() {
+        let samples = clicks(std::iter::once(0.0).chain((1..58).map(|k| f64::from(k) * PERIOD + 0.001)));
+        let mut tempo = result(vec![
+            Segment { from_secs: 0.0, to_secs: PERIOD, period_secs: PERIOD, phase_secs: 0.0 },
+            Segment { from_secs: PERIOD, to_secs: SECS, period_secs: PERIOD, phase_secs: PERIOD },
+        ]);
+        let report = refine(&mut tempo, &samples, RATE);
+        assert!(report.applied, "{report:?}");
+        assert_eq!(tempo.beats[0].time_ms, 0);
+        assert_eq!(tempo.beats[1].time_ms, 501);
+    }
+
+    #[test]
+    fn scattered_transients_leave_the_grid_alone() {
+        let samples = clicks((1..58).map(|k| f64::from(k) * PERIOD + if k % 2 == 0 { 0.004 } else { -0.003 }));
+        let mut tempo = result(vec![Segment { from_secs: 0.0, to_secs: SECS, period_secs: PERIOD, phase_secs: PERIOD }]);
+        let report = refine(&mut tempo, &samples, RATE);
+        assert!(!report.applied, "{report:?}");
+        assert!((tempo.segments[0].phase_secs - PERIOD).abs() < f64::EPSILON);
+    }
 }
