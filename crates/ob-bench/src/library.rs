@@ -57,6 +57,12 @@ struct Versus {
     bar_offset: u8,
     fit: Fit,
     runtime_ms: f64,
+    /// openbox only: the candidate stage's tempo, the neural tempo, its
+    /// consistency, and whether the grid was refitted at a ratio of it.
+    dsp_bpm: Option<f64>,
+    neural_bpm: Option<f64>,
+    neural_consistency: Option<f64>,
+    octave_applied: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -126,7 +132,21 @@ fn versus(name: &'static str, prediction: &Prediction, rekordbox: &[(u32, u16)],
         "shifted"
     };
     let bar_offset = bars.iter().enumerate().max_by_key(|(_, n)| **n).map_or(0, |(o, _)| o) as u8;
-    Versus { analyzer: name, bpm: prediction.bpm, bpm_diff, median_offset_ms: median, p90_abs_offset_ms: p90, relation, bar_offset, fit, runtime_ms }
+    Versus {
+        analyzer: name,
+        bpm: prediction.bpm,
+        bpm_diff,
+        median_offset_ms: median,
+        p90_abs_offset_ms: p90,
+        relation,
+        bar_offset,
+        fit,
+        runtime_ms,
+        dsp_bpm: None,
+        neural_bpm: None,
+        neural_consistency: None,
+        octave_applied: None,
+    }
 }
 
 fn copy_library(out: &Path) -> Result<rbl_db::LibraryLocation, String> {
@@ -231,11 +251,18 @@ pub fn run(limit: Option<usize>, jobs: usize, filter: Option<&str>) {
                 let mut compared = Vec::new();
                 for a in &analyzers {
                     let t = Instant::now();
-                    let prediction = a.analyse(samples, sr);
+                    let (prediction, report) = a.analyse_reported(samples, sr);
                     let runtime = t.elapsed().as_secs_f64() * 1000.0;
                     let beats: Vec<f64> = prediction.beats.iter().map(|b| b.secs).collect();
                     let fit = fit_of(&beats, &kicks, &attacks);
-                    compared.push(versus(a.name(), &prediction, &job.grid_ms, job.bpm, fit, runtime));
+                    let mut v = versus(a.name(), &prediction, &job.grid_ms, job.bpm, fit, runtime);
+                    if let Some(octave) = report.map(|r| r.octave) {
+                        v.dsp_bpm = Some(octave.dsp_bpm);
+                        v.neural_bpm = octave.neural_bpm;
+                        v.neural_consistency = Some(octave.consistency);
+                        v.octave_applied = Some(octave.applied);
+                    }
+                    compared.push(v);
                 }
                 let record = Record {
                     id: job.id,

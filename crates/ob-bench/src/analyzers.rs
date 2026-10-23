@@ -7,6 +7,10 @@ use crate::metrics::{PredictedBeat, Prediction};
 pub trait Analyzer: Sync {
     fn name(&self) -> &'static str;
     fn analyse(&self, samples: &[f32], sample_rate: u32) -> Prediction;
+    /// The prediction and, for openbox, the evidence behind it.
+    fn analyse_reported(&self, samples: &[f32], sample_rate: u32) -> (Prediction, Option<ob_analysis::Report>) {
+        (self.analyse(samples, sample_rate), None)
+    }
 }
 
 /// rbxport's analyzer with one of its app presets.
@@ -51,8 +55,12 @@ impl Analyzer for Openbox {
     }
 
     fn analyse(&self, samples: &[f32], sample_rate: u32) -> Prediction {
+        self.analyse_reported(samples, sample_rate).0
+    }
+
+    fn analyse_reported(&self, samples: &[f32], sample_rate: u32) -> (Prediction, Option<ob_analysis::Report>) {
         let result = ob_analysis::analyse(samples, sample_rate, &self.options());
-        prediction_of(&result.analysis.tempo)
+        (prediction_of(&result.analysis.tempo), Some(result.report))
     }
 }
 

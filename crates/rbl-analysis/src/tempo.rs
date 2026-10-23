@@ -349,6 +349,32 @@ pub fn detect_tempo_with(
     detect_tempo_traced(onsets, kicks, attacks, options, None)
 }
 
+/// [`detect_tempo_with`] at a tempo the caller chose instead of the
+/// candidate stage's: the grid is fitted near `bpm`. Confidence is zero.
+#[allow(clippy::needless_pass_by_value, reason = "a Copy options struct")]
+pub fn detect_tempo_at(
+    onsets: &OnsetEnvelope,
+    kicks: Option<&OnsetEnvelope>,
+    attacks: Option<&AttackMap>,
+    options: TempoOptions,
+    bpm: f64,
+) -> TempoResult {
+    if onsets.len() < 64 || onsets.rate <= 0.0 || bpm.is_nan() || bpm <= 0.0 {
+        return TempoResult::empty();
+    }
+    let values: Vec<f64> = onsets.values.iter().map(|&v| f64::from(v)).collect();
+    let attacks = match options.placement {
+        Placement::Attack => attacks,
+        Placement::Envelope => None,
+    };
+    let kicks = kicks.filter(|k| k.rate > 0.0 && !k.is_empty());
+    let reader = Reader { values: &values, rate: onsets.rate, origin_secs: onsets.origin_secs, attacks, kicks };
+    let segments = segment(reader, bpm, options, None);
+    let beats = beats_of(&segments, 0);
+    let (bpm, first_beat_secs) = segments.first().map_or((0.0, 0.0), |s| (s.bpm(), s.start_secs()));
+    TempoResult { bpm, confidence: 0.0, first_beat_secs, segments, beats }
+}
+
 /// What the gap stage decided at one gap, for measurement.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GapDecision {

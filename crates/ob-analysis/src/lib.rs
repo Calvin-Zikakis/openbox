@@ -13,6 +13,7 @@
     reason = "DSP converts freely between sample counts and float time; every such cast is bounded by the buffer length"
 )]
 
+pub mod octave;
 pub mod phase;
 pub mod placement;
 
@@ -86,6 +87,7 @@ fn excerpt_windows(samples: &[f32], sample_rate: u32) -> Vec<(f64, f64)> {
 /// What the analyzer saw, beside what it decided.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Report {
+    pub octave: octave::OctaveReport,
     pub phase: phase::PhaseReport,
     pub placement: placement::PlacementReport,
 }
@@ -134,6 +136,15 @@ pub fn analyse(samples: &[f32], sample_rate: u32, options: &Options) -> ObAnalys
     });
 
     let mut tempo = tempo::detect_tempo_with(&onsets, kicks.as_ref(), attacks.as_ref(), options.tempo);
+    let mut octave = octave::judge(tempo.bpm, excerpts.as_deref());
+    if let Some(bpm) = octave.refit_bpm {
+        let refit = tempo::detect_tempo_at(&onsets, kicks.as_ref(), attacks.as_ref(), options.tempo, bpm);
+        // The fit may wander back to the old tempo; keep it only if it stayed.
+        if !refit.segments.is_empty() && (refit.bpm / bpm - 1.0).abs() <= 0.02 {
+            tempo = refit;
+            octave.applied = true;
+        }
+    }
     let (downbeat_secs, phase) = phase::resolve(&mut tempo, &frames, kicks.as_ref(), excerpts.as_deref(), sample_rate);
     tempo.beats = tempo::beats_of(&tempo.segments, rbl_analysis::phase_for(&tempo.segments, downbeat_secs));
     rbl_analysis::anchor_file_start(&mut tempo, samples, sample_rate, downbeat_secs);
@@ -149,7 +160,7 @@ pub fn analyse(samples: &[f32], sample_rate: u32, options: &Options) -> ObAnalys
     let (peak, rms) = level;
     ObAnalysis {
         analysis: Analysis { tempo, key: key.map(|report| report.key), waveform, peak, rms },
-        report: Report { phase, placement },
+        report: Report { octave, phase, placement },
     }
 }
 
